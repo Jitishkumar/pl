@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/package.json",
   "name": "perfectfl",
   "license": "0BSD",
   "version": "1.0.0",
