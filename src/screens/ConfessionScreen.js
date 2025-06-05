@@ -451,13 +451,12 @@ const ConfessionScreen = () => {
   
   // Update pickImage function to use Images only (not video)  
   const pickImage = async () => {
-  try {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 1,
+      });
 
     if (!result.canceled) {
       const asset = result.assets[0];

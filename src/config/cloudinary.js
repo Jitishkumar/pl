@@ -40,6 +40,26 @@ export const uploadToCloudinary = async (uri, type = 'image') => {
       };
     }
 
+    // Validate file size before attempting upload
+    try {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const fileSizeInMB = blob.size / (1024 * 1024);
+      const maxSizeMB = type === 'video' ? 50 : 5; // Reduced max size for better reliability
+      
+      if (fileSizeInMB > maxSizeMB) {
+        throw new Error(`File size too large. Please select a ${type} under ${maxSizeMB}MB for reliable uploads.`);
+      }
+      
+      console.log(`File size: ${fileSizeInMB.toFixed(2)}MB`);
+    } catch (sizeError) {
+      if (sizeError.message.includes('File size too large')) {
+        throw sizeError;
+      }
+      // If we can't check size, continue with upload attempt
+      console.warn('Could not check file size:', sizeError);
+    }
+
     const formData = new FormData();
     
     // Prepare the file
@@ -56,17 +76,31 @@ export const uploadToCloudinary = async (uri, type = 'image') => {
     // Add upload preset (create this in your Cloudinary dashboard)
     formData.append('upload_preset', 'connect_app_preset');
     
-    // Set timeout for fetch request with longer duration for large files
+    // Set timeout for fetch request with adaptive timeout based on file size
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+    const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout (reduced from 5 minutes)
     
     // Upload to Cloudinary with enhanced retry logic
-    let retries = 5; // Increased retries
+    let retries = 3; // Reduced retries but with better backoff strategy
     let response;
     let lastError;
     
     while (retries > 0) {
       try {
+        // Add network status check before attempting upload
+        const networkCheck = await fetch('https://api.cloudinary.com/v1_1', { 
+          method: 'HEAD',
+          timeout: 5000,
+          cache: 'no-cache'
+        }).catch(() => ({ ok: false }));
+          
+        if (!networkCheck.ok) {
+          console.warn('Network connection appears unstable');
+          // Don't throw here, just try the upload anyway
+        }
+        
+        console.log(`Attempt ${4-retries}: Uploading to Cloudinary...`);
+        
         response = await fetch(
           `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${type}/upload`,
           {
@@ -82,8 +116,11 @@ export const uploadToCloudinary = async (uri, type = 'image') => {
 
         // Check if response is ok before breaking
         if (response.ok) {
+          console.log('Upload successful!');
           break; // If successful, exit the retry loop
         } else {
+          const errorText = await response.text();
+          console.error(`HTTP error! status: ${response.status}, response: ${errorText}`);
           throw new Error(`HTTP error! status: ${response.status}`);
         }
       } catch (fetchError) {
@@ -92,15 +129,20 @@ export const uploadToCloudinary = async (uri, type = 'image') => {
         
         // Check if it's an abort error
         if (fetchError.name === 'AbortError') {
-          throw new Error('Upload timed out. Please try with a smaller file or check your connection.');
+          console.error('Upload timed out');
+          throw new Error('Upload timed out. Please try with a smaller file or check your connection. For videos, keep them under 50MB and for images under 5MB.');
         }
         
         if (retries === 0) {
-          throw new Error(`Upload failed after multiple attempts: ${lastError.message}`);
+          console.error('All upload attempts failed');
+          throw new Error(`Upload failed after multiple attempts. Please check your internet connection and try again later.`);
         }
         
-        // Exponential backoff with jitter
-        const backoffDelay = Math.min(1000 * Math.pow(2, 5 - retries) + Math.random() * 1000, 10000);
+        console.log(`Upload attempt failed. Retrying... (${retries} attempts left)`);
+        
+        // Exponential backoff with jitter - more aggressive for fewer retries
+        const backoffDelay = Math.min(2000 * Math.pow(2, 3 - retries) + Math.random() * 2000, 15000);
+        console.log(`Waiting ${(backoffDelay/1000).toFixed(1)} seconds before next attempt...`);
         await new Promise(resolve => setTimeout(resolve, backoffDelay));
       }
     }
@@ -110,6 +152,7 @@ export const uploadToCloudinary = async (uri, type = 'image') => {
     const data = await response.json();
     
     if (data.error) {
+      console.error('Cloudinary API error:', data.error);
       throw new Error(data.error.message);
     }
     

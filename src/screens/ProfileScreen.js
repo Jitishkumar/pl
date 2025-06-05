@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, Alert, Modal, ActivityIndicator, FlatList, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Video } from 'expo-av';
 import Sidebar from '../components/Sidebar';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../config/supabase';
@@ -241,15 +242,23 @@ const ProfileScreen = () => {
         style={styles.gridItem} 
         onPress={() => handlePostPress(index)}
       >
-        <Image
-          source={{ uri: item.media_url || 'https://via.placeholder.com/300' }}
-          style={styles.gridImage}
-          resizeMode="cover"
-        />
-        {item.type === 'video' && (
-          <View style={styles.videoIndicator}>
-            <Ionicons name="play-circle" size={24} color="#fff" />
+        {item.type === 'video' ? (
+          <View style={styles.gridVideoContainer}>
+            <Image
+              source={{ uri: item.media_url || 'https://via.placeholder.com/300' }}
+              style={styles.gridImage}
+              resizeMode="cover"
+            />
+            <View style={styles.videoIndicator}>
+              <Ionicons name="play-circle" size={24} color="#fff" />
+            </View>
           </View>
+        ) : (
+          <Image
+            source={{ uri: item.media_url || 'https://via.placeholder.com/300' }}
+            style={styles.gridImage}
+            resizeMode="cover"
+          />
         )}
         <View style={styles.gridItemOverlay}>
           <View style={styles.gridItemStats}>
@@ -276,17 +285,33 @@ const ProfileScreen = () => {
 
       <View style={styles.profileSection}>
         <View style={styles.coverPhotoContainer}>
-          <Image
-            style={styles.coverPhoto}
-            source={
-              userProfile?.cover_url
-                ? { uri: userProfile.cover_url, cache: 'reload' }
-                : require('../../assets/defaultcover.png')
-            }
-            onLoadStart={() => console.log('Cover photo loading started')}
-            onLoadEnd={() => console.log('Cover photo loading ended')}
-            onError={(e) => console.log('Cover photo error:', e.nativeEvent.error)}
-          />
+          {userProfile?.cover_is_video ? (
+            <View style={styles.videoCoverContainer}>
+              <Video
+                source={{ uri: userProfile.cover_url }}
+                style={styles.coverPhoto}
+                resizeMode="cover"
+                shouldPlay
+                isLooping
+                isMuted={true}
+              />
+              <View style={styles.videoIndicatorOverlay}>
+                <Ionicons name="videocam" size={20} color="#fff" />
+              </View>
+            </View>
+          ) : (
+            <Image
+              style={styles.coverPhoto}
+              source={
+                userProfile?.cover_url
+                  ? { uri: userProfile.cover_url, cache: 'reload' }
+                  : require('../../assets/defaultcover.png')
+              }
+              onLoadStart={() => console.log('Cover photo loading started')}
+              onLoadEnd={() => console.log('Cover photo loading ended')}
+              onError={(e) => console.log('Cover photo error:', e.nativeEvent.error)}
+            />
+          )}
         </View>
         
         <Image
@@ -572,6 +597,18 @@ const ProfileScreen = () => {
         console.error('Error loading user profile:', error);
         setUserProfile(null);
         return;
+      }
+      
+      // Check if cover URL is a video by extension if cover_is_video flag is not set
+      if (newData.cover_url && newData.cover_url.endsWith('.mp4') && !newData.cover_is_video) {
+        // Update the profile with cover_is_video flag
+        await supabase
+          .from('profiles')
+          .update({ cover_is_video: true })
+          .eq('id', user.id);
+          
+        // Update the local data
+        newData.cover_is_video = true;
       }
 
       if (oldData?.avatar_url && oldData.avatar_url !== newData.avatar_url) {
@@ -892,12 +929,28 @@ const ProfileScreen = () => {
           fetchUserContent();
         }}
         refreshing={loading}
+        contentContainerStyle={{ paddingBottom: 80 }}
       />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  videoCoverContainer: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+  },
+  videoIndicatorOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 15,
+    padding: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: '#000',
@@ -1072,6 +1125,14 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  gridVideoContainer: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   videoIndicator: {
     position: 'absolute',
     top: '50%',
@@ -1079,6 +1140,8 @@ const styles = StyleSheet.create({
     transform: [{ translateX: -12 }, { translateY: -12 }],
     backgroundColor: 'rgba(0,0,0,0.3)',
     borderRadius: 12,
+    padding: 4,
+    zIndex: 2,
   },
   gridItemOverlay: {
     position: 'absolute',

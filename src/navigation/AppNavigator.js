@@ -1,8 +1,9 @@
 import React from 'react';
-
+import { View, Platform } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import SignupScreen from '../screens/SignupScreen';
@@ -24,18 +25,29 @@ import SettingsScreen from '../screens/SettingsScreen';
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-const TabNavigator = () => (
+const TabNavigator = () => {
+  const insets = useSafeAreaInsets();
+  
+  return (
   <Tab.Navigator
     screenOptions={{
       headerShown: false,
       tabBarStyle: {
         backgroundColor: '#000033',
         borderTopWidth: 0,
-        height: 60,
-        paddingBottom: 5,
+        height: 60 + (insets.bottom > 0 ? insets.bottom : 10),
+        paddingBottom: insets.bottom > 0 ? insets.bottom : 5,
+        position: 'absolute',
+        elevation: 0,
+        borderTopLeftRadius: 15,
+        borderTopRightRadius: 15,
       },
       tabBarActiveTintColor: '#3399ff',
       tabBarInactiveTintColor: '#666666',
+      tabBarHideOnKeyboard: true,
+      tabBarLabelStyle: {
+        paddingBottom: Platform.OS === 'ios' ? 0 : 5,
+      },
     }}
   >
     <Tab.Screen 
@@ -75,7 +87,8 @@ const TabNavigator = () => (
       }}
     />
   </Tab.Navigator>
-);
+  );
+};
 
 export const AppNavigator = () => {
   return (

@@ -135,6 +135,16 @@ export class StoriesService {
   // Upload a new story
   static async uploadStory(uri, type = 'image') {
     try {
+      // Validate file size before upload
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const fileSizeInMB = blob.size / (1024 * 1024);
+      const maxSizeMB = type === 'video' ? 70 : 5; // 20MB for videos, 5MB for images
+      
+      if (fileSizeInMB > maxSizeMB) {
+        throw new Error(`File size too large. Please select a ${type} under ${maxSizeMB}MB.`);
+      }
+      
       // First upload media to Cloudinary
       const cloudinaryResponse = await uploadToCloudinary(uri, type);
       

@@ -99,7 +99,15 @@ const MessageScreen = () => {
         sender_id: newMessage.sender_id
       };
       
-      setMessages(prevMessages => [...prevMessages, formattedMessage]);
+      // Check if this message already exists in our state (to avoid duplicates)
+      setMessages(prevMessages => {
+        // Check if we already have this message in our state
+        const messageExists = prevMessages.some(msg => msg.id === formattedMessage.id);
+        if (messageExists) {
+          return prevMessages;
+        }
+        return [...prevMessages, formattedMessage];
+      });
     } else if (payload.eventType === 'DELETE') {
       // Remove deleted message from UI
       setMessages(prevMessages => 
@@ -296,88 +304,90 @@ const MessageScreen = () => {
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="light" />
-      
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top }]}>
-        <TouchableOpacity 
-          style={styles.backButton} 
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      <View style={styles.container}>
+        <StatusBar style="light" />
         
-        <View style={styles.profileInfo}>
-          <Image 
-            source={{ uri: recipientAvatar || 'https://via.placeholder.com/40' }} 
-            style={styles.avatar} 
-          />
-          <Text style={styles.headerTitle}>{getDisplayName()}</Text>
+        {/* Header */}
+        <View style={[styles.header, { paddingTop: insets.top }]}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          
+          <View style={styles.profileInfo}>
+            <Image 
+              source={{ uri: recipientAvatar || 'https://via.placeholder.com/40' }} 
+              style={styles.avatar} 
+            />
+            <Text style={styles.headerTitle}>{getDisplayName()}</Text>
+          </View>
+        </View>
+
+        {/* Messages List */}
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          style={styles.messageList}
+          contentContainerStyle={styles.messageListContent}
+          onContentSizeChange={() => {
+            if (messages.length > 0) {
+              flatListRef.current?.scrollToEnd({ animated: true });
+            }
+          }}
+          ListEmptyComponent={
+            !loading ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No messages yet</Text>
+                <Text style={styles.emptySubtext}>Start a conversation!</Text>
+              </View>
+            ) : (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color="#3399ff" />
+                <Text style={styles.loadingText}>Loading messages...</Text>
+              </View>
+            )
+          }
+        />
+
+        {/* Input Area */}
+        <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={styles.input}
+              value={inputText}
+              onChangeText={setInputText}
+              placeholder="Type a message..."
+              placeholderTextColor="#666"
+              multiline
+            />
+            
+            <TouchableOpacity 
+              onPress={sendMessage} 
+              style={[
+                styles.sendButton,
+                !inputText.trim() ? styles.sendButtonDisabled : styles.sendButtonActive
+              ]}
+              disabled={!inputText.trim()}
+            >
+              <Ionicons 
+                name="send" 
+                size={24} 
+                color={inputText.trim() ? "#fff" : "#666"} 
+              />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
-
-      {/* Messages List */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMessage}
-        style={styles.messageList}
-        contentContainerStyle={[styles.messageListContent, { paddingBottom: insets.bottom }]}
-        onContentSizeChange={() => {
-          if (messages.length > 0) {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }
-        }}
-        ListEmptyComponent={
-          !loading ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No messages yet</Text>
-              <Text style={styles.emptySubtext}>Start a conversation!</Text>
-            </View>
-          ) : (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color="#3399ff" />
-              <Text style={styles.loadingText}>Loading messages...</Text>
-            </View>
-          )
-        }
-      />
-
-      {/* Input Area */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-        style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}
-      >
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={styles.input}
-            value={inputText}
-            onChangeText={setInputText}
-            placeholder="Type a message..."
-            placeholderTextColor="#666"
-            multiline
-          />
-          
-          <TouchableOpacity 
-            onPress={sendMessage} 
-            style={[
-              styles.sendButton,
-              !inputText.trim() ? styles.sendButtonDisabled : styles.sendButtonActive
-            ]}
-            disabled={!inputText.trim()}
-          >
-            <Ionicons 
-              name="send" 
-              size={24} 
-              color={inputText.trim() ? "#fff" : "#666"} 
-            />
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -443,12 +453,12 @@ const styles = StyleSheet.create({
     shadowRadius: 1,
   },
   myMessage: {
-    backgroundColor: '#ff00ff',
+    backgroundColor: '#333',
     alignSelf: 'flex-end',
     borderTopRightRadius: 4,
   },
   theirMessage: {
-    backgroundColor: '#333',
+    backgroundColor: '#ff00ff',
     alignSelf: 'flex-start',
     borderTopLeftRadius: 4,
   },

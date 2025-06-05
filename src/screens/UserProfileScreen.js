@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { supabase } from '../config/supabase';
 import ProfileViewBlinker from '../components/ProfileViewBlinker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const UserProfileScreen = () => {
   const [userProfile, setUserProfile] = useState(null);
@@ -11,6 +12,7 @@ const UserProfileScreen = () => {
   const [showFullBio, setShowFullBio] = useState(false);
   const [viewerGender, setViewerGender] = useState(null);
   const blinkAnimation = useRef(new Animated.Value(0)).current;
+  const insets = useSafeAreaInsets();
 
   // Function to create blinking animation
   const createBlinkAnimation = (color) => {

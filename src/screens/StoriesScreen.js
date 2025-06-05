@@ -12,7 +12,7 @@ import {
   Modal,
   Platform
 } from 'react-native';
-import { Video } from 'expo-av';
+import { Video } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { StoriesService } from '../services/StoriesService';

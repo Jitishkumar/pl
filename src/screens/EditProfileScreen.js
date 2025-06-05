@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert,
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../config/supabase';
 import * as ImagePicker from 'expo-image-picker';
+import { Video } from 'expo-av';
 import { decode } from 'base64-arraybuffer';
 
 const EditProfileScreen = ({ navigation }) => {
@@ -37,6 +38,17 @@ const EditProfileScreen = ({ navigation }) => {
           setAvatarUrl(data.avatar_url);
           setCoverUrl(data.cover_url);
           setGender(data.gender || '');
+          
+          // If the cover URL is a video (either by extension or by the cover_is_video flag)
+          if ((data.cover_url && data.cover_url.endsWith('.mp4')) || data.cover_is_video) {
+            // Ensure the profile has the cover_is_video flag set
+            if (!data.cover_is_video) {
+              await supabase
+                .from('profiles')
+                .update({ cover_is_video: true })
+                .eq('id', user.id);
+            }
+          }
         }
       }
     } catch (error) {
@@ -46,31 +58,53 @@ const EditProfileScreen = ({ navigation }) => {
 
   const pickImage = async (type) => {
     try {
+      // Allow videos only for cover photos, not for avatar
+      const mediaTypes = type === 'cover' ? ImagePicker.MediaType.All : ImagePicker.MediaType.Images;
+      
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes,
         allowsEditing: true,
         aspect: type === 'avatar' ? [1, 1] : [16, 9],
         quality: 0.5,
         base64: true,
+        videoMaxDuration: 30, // Limit video duration to 30 seconds
       });
 
       if (!result.canceled && result.assets[0]) {
         const file = result.assets[0];
-        await uploadImage(file.base64, type);
+        const isVideo = file.type?.startsWith('video');
+        
+        if (type === 'avatar' && isVideo) {
+          Alert.alert('Error', 'Videos can only be used as cover photos, not as profile pictures');
+          return;
+        }
+        
+        await uploadImage(file.base64, type, isVideo);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to pick image');
+      console.error('Error picking media:', error);
+      Alert.alert('Error', 'Failed to pick media');
     }
   };
 
-  const uploadImage = async (base64Image, type) => {
+  const uploadImage = async (base64Image, type, isVideo = false) => {
     try {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No user');
 
-      const filePath = `${user.id}/${type}_${Date.now()}.jpg`;
-      const contentType = 'image/jpeg';
+      // Check file size (base64 string length is approximately 4/3 of the file size)
+      const fileSizeInMB = (base64Image.length * 0.75) / (1024 * 1024);
+      const maxSizeMB = isVideo ? 20 : 5; // 20MB for videos, 5MB for images
+      
+      if (fileSizeInMB > maxSizeMB) {
+        throw new Error(`File size too large. Please select a ${isVideo ? 'video' : 'photo'} under ${maxSizeMB}MB.`);
+      }
+
+      // Set appropriate file extension and content type based on media type
+      const fileExtension = isVideo ? 'mp4' : 'jpg';
+      const contentType = isVideo ? 'video/mp4' : 'image/jpeg';
+      const filePath = `${user.id}/${type}_${Date.now()}.${fileExtension}`;
       const body = decode(base64Image);
 
       // Delete old file if exists
@@ -99,7 +133,18 @@ const EditProfileScreen = ({ navigation }) => {
       if (type === 'avatar') {
         setAvatarUrl(publicUrl);
       } else {
+        // For cover, also store whether it's a video
         setCoverUrl(publicUrl);
+        // Update the profile with the cover_is_video field
+        if (isVideo) {
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          if (currentUser) {
+            await supabase
+              .from('profiles')
+              .update({ cover_is_video: isVideo })
+              .eq('id', currentUser.id);
+          }
+        }
       }
 
       console.log(`${type} URL:`, publicUrl); // Debug log
@@ -152,6 +197,13 @@ const EditProfileScreen = ({ navigation }) => {
         return;
       }
 
+      // Get the current profile to check if cover is video
+      const { data: currentProfile } = await supabase
+        .from('profiles')
+        .select('cover_is_video')
+        .eq('id', user.id)
+        .single();
+
       // Update profile with lowercase username
       const { error: updateError } = await supabase
         .from('profiles')
@@ -163,6 +215,8 @@ const EditProfileScreen = ({ navigation }) => {
           avatar_url: avatarUrl,
           cover_url: coverUrl,
           gender,
+          // Preserve the cover_is_video field if it exists
+          cover_is_video: currentProfile?.cover_is_video || false,
         }, { onConflict: 'id' });
 
       if (updateError) {
@@ -186,11 +240,29 @@ const EditProfileScreen = ({ navigation }) => {
       {/* Cover Photo */}
       <TouchableOpacity onPress={() => pickImage('cover')} style={styles.coverContainer}>
         {coverUrl ? (
-          <Image source={{ uri: coverUrl }} style={styles.coverPhoto} />
+          <View style={styles.coverPhotoContainer}>
+            {coverUrl.endsWith('.mp4') ? (
+              <Video
+                source={{ uri: coverUrl }}
+                style={styles.coverPhoto}
+                resizeMode="cover"
+                shouldPlay
+                isLooping
+                isMuted={true}
+              />
+            ) : (
+              <Image source={{ uri: coverUrl }} style={styles.coverPhoto} />
+            )}
+            <View style={styles.coverTypeIndicator}>
+              <Ionicons name={coverUrl.endsWith('.mp4') ? "videocam" : "image"} size={20} color="#fff" />
+              <Text style={styles.coverTypeText}>{coverUrl.endsWith('.mp4') ? "Video" : "Photo"}</Text>
+            </View>
+          </View>
         ) : (
           <View style={styles.coverPlaceholder}>
             <Ionicons name="image-outline" size={40} color="#666" />
-            <Text style={styles.placeholderText}>Add Cover Photo</Text>
+            <Ionicons name="videocam-outline" size={40} color="#666" style={{ marginLeft: 10 }} />
+            <Text style={styles.placeholderText}>Add Cover Photo or Video</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -339,6 +411,26 @@ const EditProfileScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  coverPhotoContainer: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+  },
+  coverTypeIndicator: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 15,
+    padding: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  coverTypeText: {
+    color: '#fff',
+    fontSize: 12,
+    marginLeft: 5,
+  },
   modalContainer: {
     flex: 1,
     justifyContent: 'center',

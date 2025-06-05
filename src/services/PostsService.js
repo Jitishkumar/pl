@@ -2,7 +2,7 @@ import { supabase } from '../config/supabase';
 import { uploadToCloudinary, deleteFromCloudinary } from '../config/cloudinary';
 
 export class PostsService {
-  // Create a new posttdkjdj
+  // Create a new post
   static async createPost(uri = null, caption = '', type = 'text') {
     try {
       // Get current user
@@ -26,17 +26,15 @@ export class PostsService {
       // Handle media upload if URI is provided
       if (uri) {
         try {
-          // Validate file size before upload (max 50MB)
-          const response = await fetch(uri);
-          const blob = await response.blob();
-          if (blob.size > 50 * 1024 * 1024) {
-            throw new Error('File size too large. Please select a file under 50MB.');
-          }
-
+          // Let cloudinary.js handle file size validation
+          console.log(`Uploading ${finalType} to Cloudinary...`);
+          
           const cloudinaryResponse = await uploadToCloudinary(uri, finalType);
           if (!cloudinaryResponse || !cloudinaryResponse.url) {
             throw new Error('Failed to upload media. Please check your internet connection and try again.');
           }
+          
+          console.log('Upload successful, saving post data...');
           postData = {
             ...postData,
             media_url: cloudinaryResponse.url,
@@ -59,6 +57,7 @@ export class PostsService {
       }
       
       // Save post to Supabase
+      console.log('Saving post to database...');
       const { data, error } = await supabase
         .from('posts')
         .insert(postData)
@@ -77,6 +76,7 @@ export class PostsService {
         throw new Error(error.message || 'Failed to create post. Please try again.');
       }
       
+      console.log('Post created successfully!');
       return data;
       
     } catch (error) {
