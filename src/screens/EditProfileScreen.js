@@ -59,7 +59,7 @@ const EditProfileScreen = ({ navigation }) => {
   const pickImage = async (type) => {
     try {
       // Allow videos only for cover photos, not for avatar
-      const mediaTypes = type === 'cover' ? ImagePicker.MediaType.All : ImagePicker.MediaType.Images;
+      const mediaTypes = type === 'cover' ? ['images', 'videos'] : ['images'];
       
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes,
@@ -79,6 +79,12 @@ const EditProfileScreen = ({ navigation }) => {
           return;
         }
         
+        // Check if base64 data is available
+        if (!file.base64) {
+          Alert.alert('Error', 'Could not process the selected file. Please try another one.');
+          return;
+        }
+        
         await uploadImage(file.base64, type, isVideo);
       }
     } catch (error) {
@@ -92,6 +98,11 @@ const EditProfileScreen = ({ navigation }) => {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No user');
+
+      // Check if base64Image is null or undefined
+      if (!base64Image) {
+        throw new Error('Invalid image data. Please try again.');
+      }
 
       // Check file size (base64 string length is approximately 4/3 of the file size)
       const fileSizeInMB = (base64Image.length * 0.75) / (1024 * 1024);
