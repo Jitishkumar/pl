@@ -1,24 +1,37 @@
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useState, useContext, useRef } from 'react';
 
 const VideoContext = createContext();
 
 export const VideoProvider = ({ children }) => {
   const [activeVideoId, setActiveVideoId] = useState(null);
   const [isFullscreenMode, setIsFullscreenMode] = useState(false);
+  const previousActiveVideo = useRef(null);
 
   // Set the currently playing video
   const setActiveVideo = (videoId) => {
+    // Store the previous active video before changing
+    previousActiveVideo.current = activeVideoId;
     setActiveVideoId(videoId);
   };
 
   // Clear the currently playing video
   const clearActiveVideo = () => {
+    previousActiveVideo.current = activeVideoId;
     setActiveVideoId(null);
   };
 
   // Toggle fullscreen mode
   const setFullscreen = (isFullscreen) => {
     setIsFullscreenMode(isFullscreen);
+  };
+
+  // Restore previous active video
+  const restorePreviousVideo = () => {
+    if (previousActiveVideo.current) {
+      setActiveVideoId(previousActiveVideo.current);
+      return previousActiveVideo.current;
+    }
+    return null;
   };
 
   return (
@@ -28,7 +41,8 @@ export const VideoProvider = ({ children }) => {
         isFullscreenMode,
         setActiveVideo,
         clearActiveVideo,
-        setFullscreen
+        setFullscreen,
+        restorePreviousVideo
       }}
     >
       {children}

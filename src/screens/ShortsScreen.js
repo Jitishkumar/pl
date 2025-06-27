@@ -16,7 +16,7 @@ const ShortsScreen = ({ route }) => {
   const flatListRef = useRef(null);
   const videoRefs = useRef({});
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(true); // Default to playing
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -110,13 +110,10 @@ const ShortsScreen = ({ route }) => {
         videoRefs.current[currentIndex].pauseAsync();
       }
       
-      // Play new video
+      // Play new video - always auto-play when a new video becomes visible
       if (videoRefs.current[newIndex]) {
-        if (isPlaying) {
-          videoRefs.current[newIndex].playAsync();
-        } else {
-          videoRefs.current[newIndex].pauseAsync();
-        }
+        videoRefs.current[newIndex].playAsync();
+        setIsPlaying(true);
       }
       
       setCurrentIndex(newIndex);

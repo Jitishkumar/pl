@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useVideo } from '../context/VideoContext';
 import { StyleSheet, View, Text, TouchableOpacity, TextInput, Image, Modal, ActivityIndicator, FlatList, RefreshControl, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFonts, Poppins_700Bold } from '@expo-google-fonts/poppins';
@@ -46,6 +47,41 @@ const HomeScreen = () => {
 
     return unsubscribe;
   }, [navigation]);
+  
+  // Set up video context for auto-playing videos
+  const { setActiveVideo, clearActiveVideo } = useVideo();
+  const visibleVideoRef = useRef(null);
+  
+  // Add a function to handle viewable items changed
+  const onViewableItemsChanged = ({ viewableItems }) => {
+    if (viewableItems && viewableItems.length > 0) {
+      // Find the first video post that's visible
+      const videoPost = viewableItems.find(item => 
+        item.item.type === 'video' || item.item.mediaType === 'video'
+      );
+      
+      if (videoPost) {
+        // If we found a visible video post, set it as the active video
+        setActiveVideo(videoPost.item.id);
+        visibleVideoRef.current = videoPost.item.id;
+      } else {
+        // If no video posts are visible, clear the active video
+        clearActiveVideo();
+        visibleVideoRef.current = null;
+      }
+    }
+  };
+  
+  // Create a ref for the viewability configuration
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50,
+    minimumViewTime: 300,
+  });
+  
+  // Create a ref for the viewability changed callback
+  const viewabilityConfigCallbackPairs = useRef([
+    { viewabilityConfig: viewabilityConfig.current, onViewableItemsChanged }
+  ]);
 
   const loadPosts = async () => {
     try {
@@ -303,6 +339,7 @@ const HomeScreen = () => {
                 tintColor="#ff00ff"
               />
             }
+            viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
           />
         )}
 

@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   Image,
   Dimensions,
   ActivityIndicator,
@@ -32,6 +32,8 @@ const PostItem = ({ post, onOptionsPress }) => {
   const [likesCount, setLikesCount] = useState(post.likes?.[0]?.count || 0);
   const [commentsCount, setCommentsCount] = useState(post.comments?.[0]?.count || 0);
   const navigation = useNavigation();
+  const touchTimer = useRef(null);
+  const isTouchHolding = useRef(false);
 
   // Add this function to safely get the avatar URL
   const getAvatarUrl = () => {
@@ -108,6 +110,45 @@ const PostItem = ({ post, onOptionsPress }) => {
     }
     setLastTap(now);
   };
+  
+  // Add touch handlers for press-to-pause functionality
+  const handleTouchStart = () => {
+    if (post.type === 'video') {
+      // Clear any existing touch timer
+      if (touchTimer.current) {
+        clearTimeout(touchTimer.current);
+      }
+      
+      // Set a timer to detect long press (300ms)
+      touchTimer.current = setTimeout(() => {
+        if (playing) {
+          isTouchHolding.current = true;
+          setPlaying(false);
+          if (videoRef.current) {
+            videoRef.current.pauseAsync();
+          }
+        }
+      }, 300);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    // Clear the touch timer
+    if (touchTimer.current) {
+      clearTimeout(touchTimer.current);
+      touchTimer.current = null;
+    }
+    
+    // If we were holding and paused the video, resume playback
+    if (isTouchHolding.current) {
+      isTouchHolding.current = false;
+      setPlaying(true);
+      if (videoRef.current) {
+        videoRef.current.playAsync();
+      }
+      setActiveVideo(post.id);
+    }
+  };
 
   const handleFullscreenClose = () => {
     // First stop playback in fullscreen
@@ -172,6 +213,28 @@ const PostItem = ({ post, onOptionsPress }) => {
       }
     }
   }, [activeVideoId, post.id, playing]);
+  
+  // Auto-play video when it becomes visible in the viewport
+  useEffect(() => {
+    if (post.type === 'video' && videoRef.current) {
+      // Only auto-play if this post is the active video and not in fullscreen mode
+      if (activeVideoId === post.id && !isFullscreenMode && !isTouchHolding.current) {
+        setPlaying(true);
+        videoRef.current.playAsync();
+      } else if (activeVideoId !== post.id && playing) {
+        // If another video is active but this one is playing, pause it
+        setPlaying(false);
+        videoRef.current.pauseAsync();
+      }
+    }
+    
+    // Cleanup function to handle unmounting
+    return () => {
+      if (videoRef.current) {
+        videoRef.current.pauseAsync();
+      }
+    };
+  }, [post.id, activeVideoId, isFullscreenMode]);
   
   // Effect to handle fullscreen mode changes
   useEffect(() => {
@@ -376,7 +439,11 @@ const PostItem = ({ post, onOptionsPress }) => {
         {post.media_url && (
           <View style={styles.mediaContainer}>
             {post.type === 'video' ? (
-              <TouchableOpacity activeOpacity={0.9} onPress={handleVideoPress}>
+              <TouchableWithoutFeedback 
+                onPress={handleVideoPress}
+                onPressIn={handleTouchStart}
+                onPressOut={handleTouchEnd}
+              >
                 <View style={styles.videoContainer}>
                   {loading && (
                     <View style={styles.loadingContainer}>
@@ -390,10 +457,19 @@ const PostItem = ({ post, onOptionsPress }) => {
                     source={{ uri: post.media_url }}
                     style={styles.media}
                     resizeMode="cover"
-                    shouldPlay={playing && !fullscreen} // Only play if not in fullscreen mode
+                    shouldPlay={playing && activeVideoId === post.id && !isTouchHolding.current}
                     isLooping
                     onLoadStart={() => setLoading(true)}
-                    onLoad={() => setLoading(false)}
+                    onLoad={() => {
+                      setLoading(false);
+                      // Only auto-play if this is the active video and not being held
+                      if (activeVideoId === post.id && !isTouchHolding.current) {
+                        setPlaying(true);
+                        if (videoRef.current) {
+                          videoRef.current.playAsync();
+                        }
+                      }
+                    }}
                     onPlaybackStatusUpdate={(status) => {
                       if (status.isLoaded) {
                         setProgress(status.positionMillis / status.durationMillis);
@@ -407,16 +483,12 @@ const PostItem = ({ post, onOptionsPress }) => {
                     }}
                   />
 
-                  {(showControls || !playing) && (
+                  {showControls && (
                     <LinearGradient
                       colors={['transparent', 'rgba(0,0,0,0.7)']}
                       style={styles.videoControls}
                     >
-                      <View style={styles.timeContainer}>
-                        <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
-                        <Text style={styles.timeText}>{formatTime(duration)}</Text>
-                      </View>
-                      
+                      {/* Simplified controls - only show seekbar */}
                       <View style={styles.seekbarContainer}>
                         <View style={styles.progressBackground} />
                         <View style={[styles.progressBar, { width: `${progress * 100}%` }]} />
@@ -436,38 +508,6 @@ const PostItem = ({ post, onOptionsPress }) => {
                           />
                         </View>
                       </View>
-
-                      <View style={styles.controlsRow}>
-                        <TouchableOpacity style={styles.controlButton} onPress={() => handleSeek(0)}>
-                          <Ionicons name="play-skip-back" size={22} color="#fff" />
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity 
-                          style={styles.playPauseButton} 
-                          onPress={() => setPlaying(!playing)}
-                        >
-                          <LinearGradient
-                            colors={['#ff00ff', '#9900ff']}
-                            style={styles.playButtonGradient}
-                          >
-                            <Ionicons name={playing ? "pause" : "play"} size={24} color="#fff" />
-                          </LinearGradient>
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity style={styles.controlButton}>
-                          <Ionicons name="play-skip-forward" size={22} color="#fff" />
-                        </TouchableOpacity>
-                      </View>
-                    </LinearGradient>
-                  )}
-
-                  {!playing && !loading && (
-                    <LinearGradient colors={['rgba(0,0,0,0.3)', 'rgba(0,0,0,0.6)']} style={styles.videoOverlay}>
-                      <View style={styles.playButton}>
-                        <LinearGradient colors={['#ff00ff', '#9900ff']} style={styles.playButtonGradient}>
-                          <Ionicons name="play" size={30} color="#fff" />
-                        </LinearGradient>
-                      </View>
                     </LinearGradient>
                   )}
 
@@ -479,7 +519,7 @@ const PostItem = ({ post, onOptionsPress }) => {
                     </View>
                   )}
                 </View>
-              </TouchableOpacity>
+              </TouchableWithoutFeedback>
             ) : (
               <View style={styles.imageContainer}>
                 <Image
@@ -622,14 +662,26 @@ const PostItem = ({ post, onOptionsPress }) => {
             style={styles.fullscreenContainer}
           >
             <Video
-              ref={videoRef}
-              source={{ uri: post.media_url }}
-              style={styles.fullscreenVideo}
-              resizeMode="contain"
-              shouldPlay={playing && fullscreen} // Only play if in fullscreen mode
-              isLooping
-              onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-            />
+            ref={videoRef}
+            source={{ uri: post.media_url }}
+            style={styles.fullscreenVideo}
+            resizeMode="contain"
+            shouldPlay={playing && fullscreen} // Only play if in fullscreen mode
+            isLooping
+            onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+            onLoad={(status) => {
+              setLoading(false);
+              // Ensure video starts playing on load if it's not already playing
+              if (!playing) {
+                setPlaying(true);
+                setActiveVideo(post.id);
+              }
+            }}
+            onError={() => {
+              setVideoError(true);
+              setLoading(false);
+            }}
+          />
 
             {/* Top gradient with close button */}
             <LinearGradient 

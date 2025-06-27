@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import PostItem from '../components/PostItem';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useVideo } from '../context/VideoContext';
 
 const { width: windowWidth } = Dimensions.get('window');
 
@@ -19,6 +20,7 @@ const PostViewerScreen = ({ route }) => {
   const hasScrolledToIndex = useRef(false);
   const [viewableItems, setViewableItems] = useState([]);
   const insets = useSafeAreaInsets();
+  const { setActiveVideo, clearActiveVideo } = useVideo();
 
   // Scroll to the initial index when the screen loads
   useEffect(() => {
@@ -43,6 +45,21 @@ const PostViewerScreen = ({ route }) => {
       </View>
     );
   }, []);
+  
+  // Handle viewable items changed to manage video playback
+  const onViewableItemsChanged = useCallback(({ viewableItems }) => {
+    if (viewableItems.length > 0) {
+      // The first viewable item is the one we want to play
+      const viewablePost = viewableItems[0].item;
+      
+      // If it's a video post, set it as the active video in the context
+      if (viewablePost.type === 'video' || viewablePost.mediaType === 'video') {
+        setActiveVideo(viewablePost.id);
+      } else {
+        clearActiveVideo();
+      }
+    }
+  }, [setActiveVideo, clearActiveVideo]);
 
   const onScrollToIndexFailed = (info) => {
     console.log('Scroll to index failed:', info);
@@ -78,9 +95,7 @@ const PostViewerScreen = ({ route }) => {
         initialNumToRender={Math.max(initialIndex + 1, 3)} // Ensure enough items are rendered to reach initialIndex
         onScrollToIndexFailed={onScrollToIndexFailed}
         contentContainerStyle={[styles.listContent, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
-        onViewableItemsChanged={({ viewableItems: items }) => {
-          setViewableItems(items);
-        }}
+        onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
       />
     </View>
