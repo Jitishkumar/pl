@@ -335,9 +335,9 @@ const EditProfileScreen = ({ navigation }) => {
           >
             <Text style={[styles.genderText, !gender && styles.placeholderText]}>
               {gender ? (
-                gender === 'male' ? 'Male (GUY,MARD)' :
-                gender === 'female' ? 'Female (Cutie,Angel)' :
-                gender === 'third' ? 'Third gender (God gift)' : ''
+                gender === 'male' ? 'Male' :
+                gender === 'female' ? 'Female' :
+                gender === 'third' ? 'Third gender{LGBTQ+}' : ''
               ) : 'Select your gender'}
             </Text>
           </TouchableOpacity>
@@ -374,7 +374,7 @@ const EditProfileScreen = ({ navigation }) => {
                   setShowGenderModal(false);
                 }}
               >
-                <Text style={styles.genderOptionText}>Male (GUY,MARD)</Text>
+                <Text style={styles.genderOptionText}>Male</Text>
               </TouchableOpacity>
 
               <TouchableOpacity 
@@ -384,7 +384,7 @@ const EditProfileScreen = ({ navigation }) => {
                   setShowGenderModal(false);
                 }}
               >
-                <Text style={styles.genderOptionText}>Female (Cutie,Angel)</Text>
+                <Text style={styles.genderOptionText}>Female</Text>
               </TouchableOpacity>
 
               <TouchableOpacity 
@@ -394,7 +394,7 @@ const EditProfileScreen = ({ navigation }) => {
                   setShowGenderModal(false);
                 }}
               >
-                <Text style={styles.genderOptionText}>Third gender (God gift)</Text>
+                <Text style={styles.genderOptionText}>Third gender</Text>
               </TouchableOpacity>
 
               <TouchableOpacity 

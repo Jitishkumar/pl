@@ -52,6 +52,13 @@ const HomeScreen = () => {
       const data = await PostsService.getAllPosts();
       setPosts(data);
       setRefreshing(false);
+      
+      // Store video posts separately for the ShortsScreen
+      const videoPosts = data.filter(post => post.type === 'video' || post.mediaType === 'video');
+      // Make this data available to the navigation context
+      navigation.setParams({
+        videoPosts: videoPosts
+      });
     } catch (error) {
       console.error('Error loading posts:', error);
       Alert.alert('Error', 'Failed to load posts');

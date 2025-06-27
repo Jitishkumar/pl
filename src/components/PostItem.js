@@ -72,19 +72,26 @@ const PostItem = ({ post, onOptionsPress }) => {
   const handleVideoPress = () => {
     const now = Date.now();
     if (lastTap && (now - lastTap) < 300) {
-      // Double tap - go to fullscreen
+      // Double tap - go to shorts screen for vertical scrolling
       // Pause the feed video first to prevent double audio
       if (videoRef.current) {
         videoRef.current.pauseAsync();
       }
       setPlaying(false);
-      setFullscreen(true);
-      setContextFullscreen(true);
+      clearActiveVideo();
       
-      // Set a small timeout to ensure the feed video is fully paused before starting fullscreen
-      setTimeout(() => {
-        setPlaying(true);
-      }, 300);
+      // Get all video posts from the HomeScreen navigation params
+      const homeRoute = navigation.getState().routes.find(route => route.name === 'Home');
+      const videoPosts = homeRoute?.params?.videoPosts || [post]; // If no video posts available, just use current post
+      
+      // Find the index of the current post
+      const currentIndex = videoPosts.findIndex(p => p.id === post.id);
+      
+      // Navigate to ShortsScreen with all video posts and current index
+      navigation.navigate('Shorts', {
+        posts: videoPosts,
+        initialIndex: currentIndex >= 0 ? currentIndex : 0
+      });
     } else {
       // Single tap - toggle play/pause and show controls
       const newPlayingState = !playing;
@@ -176,6 +183,19 @@ const PostItem = ({ post, onOptionsPress }) => {
       }
     }
   }, [isFullscreenMode, fullscreen, playing]);
+  
+  // Effect to pass posts data to navigation state for ShortsScreen
+  useEffect(() => {
+    if (navigation) {
+      const currentRoute = navigation.getState().routes.find(route => route.name === 'Home');
+      if (currentRoute) {
+        navigation.setParams({
+          ...currentRoute.params,
+          data: currentRoute.params?.data || [post]
+        });
+      }
+    }
+  }, [navigation, post]);
   
   // Effect to ensure only one video instance is playing at a time
   useEffect(() => {
