@@ -178,11 +178,55 @@ const PostItem = ({ post, onOptionsPress }) => {
     return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
   };
   
+  // Create a PanResponder for the seekbar
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        setSeeking(true);
+        // Pause video while seeking
+        if (videoRef.current && playing) {
+          videoRef.current.pauseAsync();
+        }
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        // Calculate new progress based on touch position
+        const seekbarWidth = width - 40; // Adjust for padding
+        const newProgress = Math.max(0, Math.min(1, gestureState.moveX / seekbarWidth));
+        setProgress(newProgress);
+        // Update video position while dragging
+        if (videoRef.current && duration > 0) {
+          const newPosition = newProgress * duration;
+          videoRef.current.setPositionAsync(newPosition);
+          setCurrentTime(newPosition);
+        }
+      },
+      onPanResponderRelease: async (evt, gestureState) => {
+        // Calculate final progress and seek to that position
+        const seekbarWidth = width - 40; // Adjust for padding
+        const newProgress = Math.max(0, Math.min(1, gestureState.moveX / seekbarWidth));
+        
+        // Keep seeking true until the operation completes
+        await handleSeek(newProgress);
+        
+        // Resume playback from the new position
+        if (videoRef.current) {
+          setPlaying(true);
+          await videoRef.current.playAsync();
+        }
+        
+        // Only set seeking to false after all operations complete
+        setSeeking(false);
+      },
+    })
+  ).current;
+  
   // Handle seeking
-  const handleSeek = (value) => {
+  const handleSeek = async (value) => {
     if (videoRef.current && duration > 0) {
       const newPosition = value * duration;
-      videoRef.current.setPositionAsync(newPosition);
+      await videoRef.current.setPositionAsync(newPosition);
       setCurrentTime(newPosition);
       setProgress(value);
     }
@@ -472,8 +516,11 @@ const PostItem = ({ post, onOptionsPress }) => {
                     }}
                     onPlaybackStatusUpdate={(status) => {
                       if (status.isLoaded) {
-                        setProgress(status.positionMillis / status.durationMillis);
-                        setCurrentTime(status.positionMillis);
+                        // Only update progress if not currently seeking
+                        if (!seeking) {
+                          setProgress(status.positionMillis / status.durationMillis);
+                          setCurrentTime(status.positionMillis);
+                        }
                         setDuration(status.durationMillis);
                       }
                     }}
@@ -488,24 +535,12 @@ const PostItem = ({ post, onOptionsPress }) => {
                       colors={['transparent', 'rgba(0,0,0,0.7)']}
                       style={styles.videoControls}
                     >
-                      {/* Simplified controls - only show seekbar */}
+                      {/* Video seekbar with PanResponder */}
                       <View style={styles.seekbarContainer}>
                         <View style={styles.progressBackground} />
                         <View style={[styles.progressBar, { width: `${progress * 100}%` }]} />
-                        <View style={styles.seekbarTouchable}>
-                          <TouchableOpacity 
-                            style={[styles.seekKnob, { left: `${progress * 100}%` }]}
-                            onPressIn={() => setSeeking(true)}
-                            onPressOut={() => setSeeking(false)}
-                          />
-                          <View 
-                            style={styles.seekbarTouchArea}
-                            onTouchStart={(event) => {
-                              const { locationX } = event.nativeEvent;
-                              const seekPosition = locationX / event.currentTarget.offsetWidth;
-                              handleSeek(Math.max(0, Math.min(1, seekPosition)));
-                            }}
-                          />
+                        <View {...panResponder.panHandlers} style={styles.seekbarTouchable}>
+                          <View style={[styles.seekKnob, { left: `${progress * 100}%` }]} />
                         </View>
                       </View>
                     </LinearGradient>
@@ -683,84 +718,79 @@ const PostItem = ({ post, onOptionsPress }) => {
             }}
           />
 
-            {/* Top gradient with close button */}
-            <LinearGradient 
-              colors={['rgba(0,0,0,0.7)', 'transparent']} 
-              style={styles.fullscreenTopControls}
-            >
-              <TouchableOpacity style={styles.closeButton} onPress={handleFullscreenClose}>
-                <Ionicons name="close" size={28} color="#fff" />
-              </TouchableOpacity>
-            </LinearGradient>
-
-            {/* Bottom gradient with controls */}
-            <LinearGradient 
-              colors={['transparent', 'rgba(0,0,0,0.8)']} 
-              style={styles.fullscreenBottomControls}
-            >
-              {/* Time and seekbar */}
-              <View style={styles.fullscreenTimeContainer}>
-                <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
-                <Text style={styles.timeText}>{formatTime(duration)}</Text>
-              </View>
-              
-              <View style={styles.fullscreenSeekbarContainer}>
-                <View style={styles.fullscreenProgressBackground} />
-                <View 
-                  style={[styles.fullscreenProgressBar, { width: `${progress * 100}%` }]} 
-                />
-                <View style={styles.fullscreenSeekbarTouchable}>
-                  <TouchableOpacity 
-                    style={[styles.fullscreenSeekKnob, { left: `${progress * 100}%` }]}
-                    onPressIn={() => setSeeking(true)}
-                    onPressOut={() => setSeeking(false)}
-                  />
-                  <View 
-                    style={styles.fullscreenSeekbarTouchArea}
-                    onTouchStart={(event) => {
-                      const { locationX } = event.nativeEvent;
-                      const seekPosition = locationX / width;
-                      handleSeek(Math.max(0, Math.min(1, seekPosition)));
-                    }}
-                  />
-                </View>
-              </View>
-
-              {/* Playback controls */}
-              <View style={styles.fullscreenControlsRow}>
-                <TouchableOpacity 
-                  style={styles.fullscreenControlButton} 
-                  onPress={() => videoRef.current && videoRef.current.setPositionAsync(0)}
-                >
-                  <Ionicons name="play-skip-back" size={28} color="#fff" />
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={styles.fullscreenPlayPauseButton} 
-                  onPress={() => setPlaying(!playing)}
-                >
-                  <LinearGradient 
-                    colors={['#ff00ff', '#9900ff']} 
-                    style={styles.fullscreenPlayButtonGradient}
-                  >
-                    <Ionicons name={playing ? "pause" : "play"} size={32} color="#fff" />
-                  </LinearGradient>
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={styles.fullscreenControlButton} 
-                  onPress={() => {
-                    if (videoRef.current && duration > 0) {
-                      // Skip forward 10 seconds
-                      const newPosition = Math.min(currentTime + 10000, duration);
-                      videoRef.current.setPositionAsync(newPosition);
-                    }
-                  }}
-                >
-                  <Ionicons name="play-skip-forward" size={28} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            </LinearGradient>
+            {/* Fullscreen video controls */}
+            {fullscreen && showControls && (
+              <LinearGradient
+                colors={['rgba(0,0,0,0.9)', 'rgba(0,0,0,0.9)']}
+                style={styles.fullscreenOverlay}
+              >
+                {/* Video controls */}
+                {fullscreen && showControls && (
+                  <View>
+                    {/* Top controls */}
+                    <LinearGradient
+                      colors={['rgba(0,0,0,0.7)', 'transparent']}
+                      style={styles.fullscreenTopControls}
+                    >
+                      <TouchableOpacity onPress={handleFullscreenClose}>
+                        <Ionicons name="arrow-back" size={28} color="#fff" />
+                      </TouchableOpacity>
+                    </LinearGradient>
+                    
+                    {/* Bottom controls */}
+                    <LinearGradient
+                      colors={['transparent', 'rgba(0,0,0,0.7)']}
+                      style={styles.fullscreenBottomControls}
+                    >
+                      {/* Time display */}
+                      <View style={styles.fullscreenTimeContainer}>
+                        <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+                        <Text style={styles.timeText}>{formatTime(duration)}</Text>
+                      </View>
+                      
+                      {/* Seekbar with PanResponder */}
+                      <View style={styles.fullscreenSeekbarContainer}>
+                        <View style={styles.fullscreenProgressBackground} />
+                        <View style={[styles.fullscreenProgressBar, { width: `${progress * 100}%` }]} />
+                        <View {...panResponder.panHandlers} style={styles.seekbarTouchable}>
+                          <View style={[styles.fullscreenSeekKnob, { left: `${progress * 100}%` }]} />
+                        </View>
+                      </View>
+                      
+                      {/* Playback controls */}
+                      <View style={styles.fullscreenControlsRow}>
+                        <TouchableOpacity 
+                          style={styles.fullscreenControlButton} 
+                          onPress={() => {
+                            setSeeking(true);
+                            handleSeek(Math.max(0, progress - 0.1)).then(() => setSeeking(false));
+                          }}>
+                          <Ionicons name="play-back" size={24} color="#fff" />
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity style={styles.fullscreenPlayPauseButton} onPress={() => setPlaying(!playing)}>
+                          <LinearGradient
+                            colors={['#ff00ff', '#9900ff']}
+                            style={styles.fullscreenPlayButtonGradient}
+                          >
+                            <Ionicons name={playing ? 'pause' : 'play'} size={28} color="#fff" />
+                          </LinearGradient>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                          style={styles.fullscreenControlButton} 
+                          onPress={() => {
+                            setSeeking(true);
+                            handleSeek(Math.min(1, progress + 0.1)).then(() => setSeeking(false));
+                          }}>
+                          <Ionicons name="play-forward" size={24} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                    </LinearGradient>
+                  </View>
+                )}
+              </LinearGradient>
+            )}
           </LinearGradient>
         </Modal>
       )}
@@ -769,6 +799,15 @@ const PostItem = ({ post, onOptionsPress }) => {
 };
 
 const styles = StyleSheet.create({
+  fullscreenOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
   editInput: {
     backgroundColor: '#1a1a3a',
     borderRadius: 10,
@@ -906,14 +945,13 @@ const styles = StyleSheet.create({
   actionText: { marginTop: 2, color: '#e0e0ff', fontSize: 12 },
   likedIconBackground: { borderRadius: 20, padding: 5 },
   likedText: { color: '#ff00ff' },
-  videoControls: { position: 'absolute', bottom: 0, width: '100%', padding: 10, paddingBottom: 15 },
-  timeContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
+  videoControls: { position: 'absolute', bottom: 0, width: '100%', padding: 10, paddingBottom: 30 },  timeContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
   timeText: { color: '#fff', fontSize: 12, fontWeight: '500' },
-  seekbarContainer: { height: 20, justifyContent: 'center', width: '100%' },
+  seekbarContainer: { height: 20, justifyContent: 'center', width: '100%', marginBottom: 20 },
   progressBackground: { position: 'absolute', height: 4, width: '100%', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2 },
   progressBar: { position: 'absolute', height: 4, backgroundColor: '#ff00ff', borderRadius: 2, shadowColor: '#ff00ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 4 },
   seekKnob: { position: 'absolute', width: 16, height: 16, borderRadius: 8, backgroundColor: '#ff00ff', marginLeft: -8, borderWidth: 2, borderColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 2, zIndex: 2 },
-  seekbarTouchable: { position: 'absolute', width: '100%', height: 20 },
+  seekbarTouchable: { position: 'absolute', width: '100%', height: 20, marginBottom: 16 },
   seekbarTouchArea: { position: 'absolute', width: '100%', height: 20, backgroundColor: 'transparent', zIndex: 1 },
   controlsRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', marginTop: 10 },
   controlButton: { padding: 8 },
@@ -1001,7 +1039,8 @@ const styles = StyleSheet.create({
   fullscreenSeekbarTouchable: {
     position: 'absolute',
     width: '100%',
-    height: 30
+    height: 30,
+    marginBottom: 20 // Increased bottom margin to prevent collision with buttons
   },
   fullscreenSeekbarTouchArea: {
     position: 'absolute',
@@ -1014,7 +1053,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', 
     justifyContent: 'space-around', 
     alignItems: 'center',
-    paddingHorizontal: 20
+    paddingHorizontal: 20,
+    marginTop: 20 // Add vertical spacing between seekbar and control buttons
   },
   fullscreenControlButton: { 
     padding: 12,
