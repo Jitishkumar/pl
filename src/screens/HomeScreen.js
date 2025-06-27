@@ -200,7 +200,7 @@ const HomeScreen = () => {
               colors={['#ff66cc', '#ff3399']}
               style={styles.iconBackground}
             >
-              <Ionicons name="notifications-outline" size={22} color="#fff" />
+              <Ionicons name="videocam-outline" size={22} color="#fff" />
             </LinearGradient>
             <View style={styles.notificationBadge} />
           </TouchableOpacity>
