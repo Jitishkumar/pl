@@ -159,7 +159,7 @@ const SettingsScreen = () => {
           {renderSettingItem(
             'lock-closed',
             'Private Account',
-            'Only approved followers can see your content',
+            'Only followers can see your posts, shorts, followers and following lists. Profile info remains visible to everyone.',
             privateAccount,
             handlePrivateAccountToggle
           )}

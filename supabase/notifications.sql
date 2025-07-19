@@ -60,3 +60,15 @@ begin
   return v_notification;
 end;
 $$ language plpgsql security definer;
+
+-- Function to delete notifications older than one week
+create or replace function delete_old_notifications()
+returns void as $$
+begin
+  delete from notifications
+  where created_at < (now() - interval '1 week');
+end;
+$$ language plpgsql security definer;
+
+-- Create a scheduled job to run the cleanup function daily
+comment on function delete_old_notifications() is 'Deletes notifications older than one week';

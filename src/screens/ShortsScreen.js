@@ -6,11 +6,12 @@ import { Video } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideo } from '../context/VideoContext';
+import { supabase } from '../config/supabase';
 
 const { width, height } = Dimensions.get('window');
 
 const ShortsScreen = ({ route }) => {
-  const { posts, initialIndex = 0 } = route.params;
+  const { posts: routePosts, initialIndex = 0, userId } = route.params;
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
@@ -21,14 +22,76 @@ const ShortsScreen = ({ route }) => {
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [showControls, setShowControls] = useState(false);
+  const [posts, setPosts] = useState(routePosts || []);
+  const [loading, setLoading] = useState(!routePosts);
+  const [userProfile, setUserProfile] = useState(null);
   const controlsTimeout = useRef(null);
   const { setFullscreen } = useVideo();
+  const isUserSpecificView = !!userId;
   
   // Set fullscreen mode when component mounts
   useEffect(() => {
     setFullscreen(true);
     return () => setFullscreen(false);
   }, []);
+  
+  // Load user shorts if userId is provided
+  useEffect(() => {
+    if (userId && !routePosts) {
+      loadUserProfile();
+      loadUserShorts();
+    }
+  }, [userId]);
+
+  // Load user profile
+  const loadUserProfile = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+        
+      if (error) throw error;
+      setUserProfile(data);
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+    }
+  };
+
+  // Load user shorts
+  const loadUserShorts = async () => {
+    try {
+      setLoading(true);
+      // Get video posts for specific user
+      const { data, error } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          profiles:user_id(*),
+          likes:post_likes(user_id),
+          comments:post_comments(count)
+        `)
+        .eq('user_id', userId)
+        .eq('type', 'video')
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      
+      // Check if current user has liked each post
+      const { data: { user } } = await supabase.auth.getUser();
+      const shortsWithLikeStatus = data.map(post => ({
+        ...post,
+        is_liked: post.likes.some(like => like.user_id === user.id)
+      }));
+      
+      setPosts(shortsWithLikeStatus);
+    } catch (error) {
+      console.error('Error loading user shorts:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Scroll to initial index when component mounts
   useEffect(() => {
@@ -237,6 +300,28 @@ const ShortsScreen = ({ route }) => {
     );
   };
 
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <ActivityIndicator size="large" color="#ff00ff" />
+      </View>
+    );
+  }
+
+  if (posts.length === 0) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.emptyText}>No shorts available</Text>
+        <TouchableOpacity 
+          style={styles.backButton} 
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <FlatList
@@ -264,6 +349,20 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: '#fff',
+    fontSize: 18,
+    marginBottom: 20,
+  },
+  backButtonText: {
+    color: '#ff00ff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   videoContainer: {
     width,

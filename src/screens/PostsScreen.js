@@ -22,7 +22,7 @@ import { supabase } from '../config/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
-const PostsScreen = () => {
+const PostsScreen = ({ route }) => {
   const insets = useSafeAreaInsets();
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,15 +31,68 @@ const PostsScreen = () => {
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [comments, setComments] = useState([]);
+  const [userProfile, setUserProfile] = useState(null);
   const navigation = useNavigation();
   
-  let [fontsLoaded] = useFonts({
-    Poppins_700Bold,
-  });
-
+  // Get userId from route params if available
+  const userId = route?.params?.userId;
+  const isUserSpecificView = !!userId;
+  
   useEffect(() => {
-    loadPosts();
-  }, []);
+    if (userId) {
+      loadUserProfile();
+      loadUserPosts();
+    } else {
+      loadPosts();
+    }
+  }, [userId]);
+
+  const loadUserProfile = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+        
+      if (error) throw error;
+      setUserProfile(data);
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+    }
+  };
+
+  const loadUserPosts = async () => {
+    try {
+      // Get posts for specific user
+      const { data, error } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          profiles:user_id(*),
+          likes:post_likes(user_id),
+          comments:post_comments(count)
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      
+      // Check if current user has liked each post
+      const { data: { user } } = await supabase.auth.getUser();
+      const postsWithLikeStatus = data.map(post => ({
+        ...post,
+        is_liked: post.likes.some(like => like.user_id === user.id)
+      }));
+      
+      setPosts(postsWithLikeStatus);
+    } catch (error) {
+      console.error('Error loading user posts:', error);
+      Alert.alert('Error', 'Failed to load posts');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const loadPosts = async () => {
     try {
@@ -333,19 +386,32 @@ const PostsScreen = () => {
         end={{x: 1, y: 1}}
         style={[styles.header, { paddingTop: insets.top > 0 ? insets.top + 16 : Platform.OS === 'ios' ? 60 : 40 }]}
       >
-        <Text style={styles.headerTitle}>Feed</Text>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={handleAddPost}
-          disabled={uploading}
-        >
-          <LinearGradient
-            colors={['#ff00ff', '#9900ff']}
-            style={styles.iconBackground}
-          >
-            <Ionicons name="add-circle" size={24} color="#fff" />
-          </LinearGradient>
-        </TouchableOpacity>
+        {isUserSpecificView ? (
+          <>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>
+              {userProfile?.username ? `${userProfile.username}'s Posts` : 'Posts'}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.headerTitle}>Feed</Text>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={handleAddPost}
+              disabled={uploading}
+            >
+              <LinearGradient
+                colors={['#ff00ff', '#9900ff']}
+                style={styles.iconBackground}
+              >
+                <Ionicons name="add-circle" size={24} color="#fff" />
+              </LinearGradient>
+            </TouchableOpacity>
+          </>
+        )}
       </LinearGradient>
 
       {loading ? (
@@ -390,12 +456,16 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 30,
-    fontFamily: 'Poppins_700Bold',
     color: '#ff00ff',
     letterSpacing: 1,
     textShadowColor: 'rgba(255, 0, 255, 0.5)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 8,
+    flex: 1,
+    textAlign: 'center',
+  },
+  backButton: {
+    padding: 8,
   },
   addButton: {
     padding: 6,

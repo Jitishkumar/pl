@@ -14,6 +14,7 @@ import MessageScreen from '../screens/MessageScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 import SearchScreen from '../screens/SearchScreen';
 import UserProfileScreen from '../screens/UserProfileScreen';
+import PrivateProfileScreen from '../screens/PrivateProfileScreen';
 import StoriesScreen from '../screens/StoriesScreen';
 import AddAccountScreen from '../screens/AddAccountScreen';
 import ConfessionScreen from '../screens/ConfessionScreen';
@@ -24,6 +25,8 @@ import PostViewerScreen from '../screens/PostViewerScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import PostsScreen from '../screens/PostsScreen';
 import ShortsScreen from '../screens/ShortsScreen';
+import HomePage from '../screens/HomePage';
+import CallPage from '../screens/CallPage';
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
@@ -103,6 +106,7 @@ export const AppNavigator = () => {
       <Stack.Screen name="Search" component={SearchScreen} />
       <Stack.Screen name="Confession" component={ConfessionScreen} />
       <Stack.Screen name="UserProfile" component={UserProfileScreen} />
+      <Stack.Screen name="PrivateProfile" component={PrivateProfileScreen} />
       <Stack.Screen name="MessageScreen" component={MessageScreen} />
       <Stack.Screen name="Stories" component={StoriesScreen} options={{ headerShown: false }} />
       <Stack.Screen name="AddAccount" component={AddAccountScreen} options={{ headerShown: false }} />
@@ -112,6 +116,8 @@ export const AppNavigator = () => {
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Posts" component={PostsScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="HomePage" component={HomePage} />
+      <Stack.Screen name="CallPage" component={CallPage} />
     </Stack.Navigator>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -72,10 +72,24 @@ const NotificationsScreen = () => {
   ];
 
   useEffect(() => {
-    // In a real app, you would fetch notifications from the database
-    // For now, we'll use the sample data
-    setNotifications(sampleNotifications);
-    setLoading(false);
+    // Fetch real notifications from the database
+    fetchNotifications();
+    
+    // Set up real-time subscription for new notifications
+    const notificationsSubscription = supabase
+      .channel('public:notifications')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'notifications' }, 
+        (payload) => {
+          // When a new notification is created, refresh the notifications
+          fetchNotifications();
+      })
+      .subscribe();
+      
+    // Clean up subscription when component unmounts
+    return () => {
+      supabase.removeChannel(notificationsSubscription);
+    };
   }, []);
 
   const fetchNotifications = async () => {
@@ -84,17 +98,98 @@ const NotificationsScreen = () => {
       const { data: { user } } = await supabase.auth.getUser();
       
       if (user) {
-        const { data, error } = await supabase
+        // First fetch notifications
+        const { data: notificationsData, error: notificationsError } = await supabase
           .from('notifications')
-          .select(`
-            *,
-            sender:sender_id(id, username, avatar_url)
-          `)
+          .select('*')
           .eq('recipient_id', user.id)
           .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        setNotifications(data || []);
+          
+        if (notificationsError) throw notificationsError;
+        
+        // Then fetch sender profiles for each notification
+        const notificationsWithSenders = await Promise.all(
+          (notificationsData || []).map(async (notification) => {
+            // Get sender profile
+            const { data: senderData, error: senderError } = await supabase
+              .from('profiles')
+              .select('id, username, avatar_url')
+              .eq('id', notification.sender_id)
+              .single();
+              
+            if (senderError) {
+              console.error('Error fetching sender profile:', senderError);
+              return {
+                ...notification,
+                sender: {
+                  username: 'unknown',
+                  avatar_url: null
+                }
+              };
+            }
+            
+            return {
+              ...notification,
+              sender: senderData
+            };
+          })
+        );
+        
+        // Fetch follow requests that need action (pending status)
+        const { data: followRequests, error: followRequestsError } = await supabase
+          .from('follow_requests')
+          .select(`
+            id,
+            sender_id,
+            recipient_id,
+            status,
+            created_at
+          `)
+          .eq('recipient_id', user.id)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false });
+          
+        if (followRequestsError) throw followRequestsError;
+        
+        // Get sender profiles for follow requests
+        const followRequestsWithSenders = await Promise.all(
+          (followRequests || []).map(async (request) => {
+            // Get sender profile
+            const { data: senderData, error: senderError } = await supabase
+              .from('profiles')
+              .select('id, username, avatar_url')
+              .eq('id', request.sender_id)
+              .single();
+              
+            if (senderError) {
+              console.error('Error fetching sender profile:', senderError);
+              return {
+                ...request,
+                sender: {
+                  username: 'unknown',
+                  avatar_url: null
+                }
+              };
+            }
+            
+            // Convert follow requests to notification format
+            return {
+              id: `fr_${request.id}`, // Prefix to distinguish from regular notifications
+              sender_id: request.sender_id,
+              recipient_id: request.recipient_id,
+              type: 'follow_request',
+              content: 'wants to follow you',
+              reference_id: request.id,
+              reference_type: 'follow_request',
+              is_read: false, // Always show as unread to highlight action needed
+              created_at: request.created_at,
+              sender: senderData
+            };
+          })
+        );
+        
+        // Combine regular notifications with follow request notifications
+        setNotifications([...followRequestsWithSenders, ...notificationsWithSenders]);
       }
     } catch (error) {
       console.error('Error fetching notifications:', error);
@@ -105,6 +200,21 @@ const NotificationsScreen = () => {
 
   const markAsRead = async (notificationId) => {
     try {
+      // Check if this is a follow request notification (has fr_ prefix)
+      if (notificationId.toString().startsWith('fr_')) {
+        // For follow request notifications, we just update the UI state
+        // The actual follow request status is handled by accept/decline functions
+        setNotifications(prevNotifications =>
+          prevNotifications.map(notification =>
+            notification.id === notificationId
+              ? { ...notification, is_read: true }
+              : notification
+          )
+        );
+        return;
+      }
+      
+      // For regular notifications, update in the database
       const { error } = await supabase
         .from('notifications')
         .update({ is_read: true })
@@ -113,11 +223,13 @@ const NotificationsScreen = () => {
       if (error) throw error;
       
       // Update local state
-      setNotifications(notifications.map(notification => 
-        notification.id === notificationId 
-          ? { ...notification, is_read: true } 
-          : notification
-      ));
+      setNotifications(prevNotifications =>
+        prevNotifications.map(notification => 
+          notification.id === notificationId 
+            ? { ...notification, is_read: true } 
+            : notification
+        )
+      );
     } catch (error) {
       console.error('Error marking notification as read:', error);
     }
@@ -158,6 +270,10 @@ const NotificationsScreen = () => {
         return <Ionicons name="chatbubble" size={20} color="#0084ff" />;
       case 'follow':
         return <Ionicons name="person-add" size={20} color="#00cc99" />;
+      case 'follow_request':
+        return <Ionicons name="person-add-outline" size={20} color="#ff9900" />;
+      case 'follow_accepted':
+        return <Ionicons name="checkmark-circle" size={20} color="#00cc99" />;
       case 'mention':
         return <Ionicons name="at" size={20} color="#ffcc00" />;
       default:
@@ -165,30 +281,172 @@ const NotificationsScreen = () => {
     }
   };
 
-  const renderNotificationItem = ({ item }) => (
-    <TouchableOpacity 
-      style={[styles.notificationItem, !item.is_read && styles.unreadItem]}
-      onPress={() => markAsRead(item.id)}
-    >
-      <View style={styles.avatarContainer}>
-        <Image 
-          source={{ uri: item.sender.avatar_url }}
-          style={styles.avatar}
-        />
-        <View style={styles.iconOverlay}>
-          {getNotificationIcon(item.type)}
+  const handleAcceptFollowRequest = async (senderId, notificationId) => {
+    try {
+      let requestId;
+      
+      // Check if we have the request ID from the notification
+      if (notificationId && notificationId.toString().startsWith('fr_')) {
+        // Extract the request ID from the notification ID (remove 'fr_' prefix)
+        requestId = notificationId.substring(3);
+      } else {
+        // Fallback: get the follow request ID from the database
+        const { data: requestData, error: requestError } = await supabase
+          .from('follow_requests')
+          .select('id')
+          .eq('sender_id', senderId)
+          .eq('recipient_id', (await supabase.auth.getUser()).data.user.id)
+          .eq('status', 'pending')
+          .single();
+          
+        if (requestError) {
+          console.error('Error finding follow request:', requestError);
+          return;
+        }
+        
+        requestId = requestData.id;
+      }
+      
+      // Call the accept_follow_request function
+      const { error } = await supabase
+        .rpc('accept_follow_request', {
+          request_id: requestId
+        });
+        
+      if (error) {
+        console.error('Error accepting follow request:', error);
+        Alert.alert('Error', 'Could not accept follow request. Please try again.');
+      } else {
+        // Remove this notification from the list
+        setNotifications(prevNotifications => 
+          prevNotifications.filter(notification => notification.id !== notificationId)
+        );
+        
+        // Show success message and navigate to the user's profile
+        Alert.alert(
+          'Success', 
+          'Follow request accepted', 
+          [
+            { 
+              text: 'View Profile', 
+              onPress: () => navigation.navigate('UserProfile', { userId: senderId })
+            },
+            { text: 'OK' }
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('Error accepting follow request:', error);
+    }
+  };
+  
+  const handleDeclineFollowRequest = async (senderId, notificationId) => {
+    try {
+      let requestId;
+      
+      // Check if we have the request ID from the notification
+      if (notificationId && notificationId.toString().startsWith('fr_')) {
+        // Extract the request ID from the notification ID (remove 'fr_' prefix)
+        requestId = notificationId.substring(3);
+        
+        // Update the specific follow request
+        const { error } = await supabase
+          .from('follow_requests')
+          .update({ status: 'declined' })
+          .eq('id', requestId);
+          
+        if (error) {
+          console.error('Error declining follow request:', error);
+          Alert.alert('Error', 'Could not decline follow request. Please try again.');
+          return;
+        }
+      } else {
+        // Fallback: update based on sender and recipient IDs
+        const { error } = await supabase
+          .from('follow_requests')
+          .update({ status: 'declined' })
+          .eq('sender_id', senderId)
+          .eq('recipient_id', (await supabase.auth.getUser()).data.user.id)
+          .eq('status', 'pending');
+          
+        if (error) {
+          console.error('Error declining follow request:', error);
+          Alert.alert('Error', 'Could not decline follow request. Please try again.');
+          return;
+        }
+      }
+      
+      // Remove this notification from the list
+      setNotifications(prevNotifications => 
+        prevNotifications.filter(notification => notification.id !== notificationId)
+      );
+      
+      // Show success message
+      Alert.alert('Success', 'Follow request declined');
+    } catch (error) {
+      console.error('Error declining follow request:', error);
+    }
+  };
+
+  const renderNotificationItem = ({ item }) => {
+    // Check if this is a follow request notification
+    const isFollowRequest = item.type === 'follow_request';
+    
+    return (
+      <View style={[styles.notificationItem, !item.is_read && styles.unreadItem]}>
+        <TouchableOpacity 
+          style={styles.avatarContainer}
+          onPress={() => {
+            markAsRead(item.id);
+            navigation.navigate('UserProfile', { userId: item.sender_id });
+          }}
+        >
+          <Image 
+            source={{ uri: item.sender.avatar_url }}
+            style={styles.avatar}
+          />
+          <View style={styles.iconOverlay}>
+            {getNotificationIcon(item.type)}
+          </View>
+        </TouchableOpacity>
+        
+        <View style={styles.contentContainer}>
+          <TouchableOpacity 
+            onPress={() => {
+              markAsRead(item.id);
+              navigation.navigate('UserProfile', { userId: item.sender_id });
+            }}
+          >
+            <Text style={styles.username}>@{item.sender.username}</Text>
+          </TouchableOpacity>
+          <Text style={styles.content}>{item.content}</Text>
+          <Text style={styles.timestamp}>{formatTimeAgo(item.created_at)}</Text>
+          
+          {isFollowRequest && (
+            <View style={styles.actionButtonsContainer}>
+              <TouchableOpacity 
+                style={styles.acceptButton}
+                onPress={() => handleAcceptFollowRequest(item.sender_id, item.id)}
+              >
+                <Text style={styles.acceptButtonText}>Accept</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.declineButton}
+                onPress={() => handleDeclineFollowRequest(item.sender_id, item.id)}
+              >
+                <Text style={styles.declineButtonText}>Decline</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
+        
+        {!item.is_read && <View style={styles.unreadDot} />}
+        {!isFollowRequest && (
+          <Ionicons name="chevron-forward" size={20} color="#666" style={styles.chevronIcon} />
+        )}
       </View>
-      
-      <View style={styles.contentContainer}>
-        <Text style={styles.username}>@{item.sender.username}</Text>
-        <Text style={styles.content}>{item.content}</Text>
-        <Text style={styles.timestamp}>{formatTimeAgo(item.created_at)}</Text>
-      </View>
-      
-      {!item.is_read && <View style={styles.unreadDot} />}
-    </TouchableOpacity>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -216,6 +474,15 @@ const NotificationsScreen = () => {
             <Text style={styles.emptyText}>No notifications yet</Text>
           </View>
         }
+        ListFooterComponent={
+          notifications.length > 0 ? (
+            <View style={styles.footerContainer}>
+              <Text style={styles.footerText}>
+                <Ionicons name="time-outline" size={14} color="#999" /> Notifications are automatically deleted after one week
+              </Text>
+            </View>
+          ) : null
+        }
       />
     </View>
   );
@@ -241,6 +508,18 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 15,
+  },
+  footerContainer: {
+    padding: 15,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  footerText: {
+    color: '#999',
+    fontSize: 12,
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
   notificationItem: {
     flexDirection: 'row',
@@ -285,6 +564,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     marginBottom: 4,
+    textDecorationLine: 'underline',
   },
   content: {
     color: '#fff',
@@ -293,6 +573,33 @@ const styles = StyleSheet.create({
   },
   timestamp: {
     color: '#999',
+    fontSize: 12,
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    marginTop: 8,
+  },
+  acceptButton: {
+    backgroundColor: '#00cc99',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    marginRight: 10,
+  },
+  acceptButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  declineButton: {
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+  },
+  declineButtonText: {
+    color: '#666',
+    fontWeight: 'bold',
     fontSize: 12,
   },
   unreadDot: {
@@ -314,6 +621,11 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 16,
     marginTop: 10,
+  },
+  chevronIcon: {
+    position: 'absolute',
+    right: 15,
+    alignSelf: 'center',
   },
 });
 

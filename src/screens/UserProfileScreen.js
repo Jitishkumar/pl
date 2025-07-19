@@ -1,18 +1,28 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, ActivityIndicator, Animated } from 'react-native';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, ActivityIndicator, Animated, Alert, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { supabase } from '../config/supabase';
 import ProfileViewBlinker from '../components/ProfileViewBlinker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Video } from 'expo-av';
 
 const UserProfileScreen = () => {
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showFullBio, setShowFullBio] = useState(false);
   const [viewerGender, setViewerGender] = useState(null);
+  const [posts, setPosts] = useState([]);
+  const [shorts, setShorts] = useState([]);
+  const [postsCount, setPostsCount] = useState(0);
+  const [shortsCount, setShortsCount] = useState(0);
+  const [activeTab, setActiveTab] = useState('Details');
+  const [loadingContent, setLoadingContent] = useState(false);
   const blinkAnimation = useRef(new Animated.Value(0)).current;
   const insets = useSafeAreaInsets();
+  
+  const memoizedPosts = useMemo(() => posts, [posts]);
+  const memoizedShorts = useMemo(() => shorts, [shorts]);
 
   // Function to create blinking animation
   const createBlinkAnimation = (color) => {
@@ -66,6 +76,8 @@ const UserProfileScreen = () => {
     checkFollowStatus();
     fetchFollowersCount();
     fetchFollowingCount();
+    fetchPostsCount();
+    fetchShortsCount();
     
     // Set up realtime subscription for follows
     const followsSubscription = supabase
@@ -85,6 +97,12 @@ const UserProfileScreen = () => {
       supabase.removeChannel(followsSubscription);
     };
   }, [userId]);
+  
+  useEffect(() => {
+    if (canViewPrivateContent || !hasPrivateAccount) {
+      fetchUserContent();
+    }
+  }, [userId, activeTab, canViewPrivateContent, hasPrivateAccount]);
 
   const loadViewerGender = async () => {
     try {
@@ -104,6 +122,9 @@ const UserProfileScreen = () => {
       console.error('Error loading viewer gender:', error);
     }
   };
+
+  const [hasPrivateAccount, setHasPrivateAccount] = useState(false);
+  const [canViewPrivateContent, setCanViewPrivateContent] = useState(false);
 
   const loadUserProfile = async () => {
     try {
@@ -131,6 +152,37 @@ const UserProfileScreen = () => {
         .select('*')
         .eq('id', userId)
         .single();
+        
+      // Check if user has private account
+      const { data: settingsData, error: settingsError } = await supabase
+        .from('user_settings')
+        .select('private_account')
+        .eq('user_id', userId)
+        .single();
+        
+      if (settingsData) {
+        setHasPrivateAccount(settingsData.private_account);
+        
+        // User can view private content if they are the profile owner or if they follow the user
+        if (currentUser) {
+          if (currentUser.id === userId) {
+            setCanViewPrivateContent(true);
+          } else if (settingsData.private_account) {
+            // Check if current user follows this profile
+            const { data: followData } = await supabase
+              .from('follows')
+              .select('*')
+              .eq('follower_id', currentUser.id)
+              .eq('following_id', userId)
+              .single();
+              
+            setCanViewPrivateContent(!!followData);
+          } else {
+            // If account is not private, anyone can view content
+            setCanViewPrivateContent(true);
+          }
+        }
+      }
   
       if (error) {
         console.error('Error loading user profile:', error);
@@ -305,7 +357,103 @@ const UserProfileScreen = () => {
       }
     };
   
-    // Fix the handleFollow function to remove the created_at field
+    const fetchPostsCount = async () => {
+      try {
+        if (!userId) return;
+
+        const { count, error } = await supabase
+          .from('posts')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userId);
+
+        if (error) {
+          console.error('Error fetching posts count:', error);
+        } else {
+          setPostsCount(count || 0);
+        }
+      } catch (error) {
+        console.error('Error fetching posts count:', error);
+      }
+    };
+
+    const fetchShortsCount = async () => {
+      try {
+        if (!userId) return;
+
+        const { count, error } = await supabase
+          .from('posts')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .eq('type', 'video');
+
+        if (error) {
+          console.error('Error fetching shorts count:', error);
+        } else {
+          setShortsCount(count || 0);
+        }
+      } catch (error) {
+        console.error('Error fetching shorts count:', error);
+      }
+    };
+  
+    const fetchUserContent = async () => {
+      try {
+        setLoadingContent(true);
+        if (!userId) return;
+
+        if (activeTab === 'Post') {
+          const { data, error } = await supabase
+            .from('posts')
+            .select(`
+              *,
+              profiles:user_id (*),
+              likes:post_likes (count),
+              comments:post_comments (count),
+              user_likes:post_likes (user_id)
+            `)
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+
+          if (error) throw error;
+          const { data: { user } } = await supabase.auth.getUser();
+          const postsWithLikeStatus = data.map(post => ({
+            ...post,
+            is_liked: post.user_likes?.some(like => like.user_id === user?.id) || false
+          }));
+          setPosts(postsWithLikeStatus || []);
+        } else if (activeTab === 'Short') {
+          const { data, error } = await supabase
+            .from('posts')
+            .select(`
+              *,
+              profiles:user_id (*),
+              likes:post_likes (count),
+              comments:post_comments (count),
+              user_likes:post_likes (user_id)
+            `)
+            .eq('user_id', userId)
+            .eq('type', 'video')
+            .order('created_at', { ascending: false });
+
+          if (error) throw error;
+          const { data: { user } } = await supabase.auth.getUser();
+          const shortsWithLikeStatus = data.map(post => ({
+            ...post,
+            is_liked: post.user_likes?.some(like => like.user_id === user?.id) || false
+          }));
+          setShorts(shortsWithLikeStatus || []);
+        }
+      } catch (error) {
+        console.error('Error fetching user content:', error);
+      } finally {
+        setLoadingContent(false);
+      }
+    };
+  
+    // Add state for follow request status
+    const [followRequestStatus, setFollowRequestStatus] = useState(null); // 'pending', 'accepted', 'declined', or null
+    
+    // Fix the handleFollow function to handle private accounts
     const handleFollow = async () => {
       try {
         const { data: session } = await supabase.auth.getSession();
@@ -335,25 +483,145 @@ const UserProfileScreen = () => {
             setFollowersCount(prev => Math.max(0, prev - 1));
           }
         } else {
-          // Follow - remove created_at field since it doesn't exist in the table
-          const { error } = await supabase
-            .from('follows')
-            .insert({
-              follower_id: currentUserId,
-              following_id: userId
-            });
-            
-          if (error) {
-            console.error('Error following user:', error);
+          // Check if the user has a private account
+          if (hasPrivateAccount) {
+            // Send a follow request instead of directly following
+            const { error } = await supabase
+              .from('follow_requests')
+              .insert({
+                sender_id: currentUserId,
+                recipient_id: userId,
+                status: 'pending'
+              });
+              
+            if (error) {
+              console.error('Error sending follow request:', error);
+            } else {
+              setFollowRequestStatus('pending');
+              
+              // Create a notification for the follow request
+              try {
+                const { data: notificationData, error: notificationError } = await supabase
+                  .rpc('create_notification', {
+                    p_recipient_id: userId,
+                    p_sender_id: currentUserId,
+                    p_type: 'follow_request',
+                    p_content: 'wants to follow you',
+                    p_reference_id: null
+                  });
+                  
+                if (notificationError) {
+                  console.error('Error creating follow request notification:', notificationError.message, notificationError.details);
+                } else {
+                  console.log('Follow request notification created successfully');
+                }
+              } catch (notifError) {
+                console.error('Exception creating follow request notification:', notifError);
+              }
+            }
           } else {
-            setIsFollowing(true);
-            setFollowersCount(prev => prev + 1);
+            // Follow - for public accounts
+            const { error } = await supabase
+              .from('follows')
+              .insert({
+                follower_id: currentUserId,
+                following_id: userId
+              });
+              
+            // Create a notification for the followed user
+            if (!error) {
+              // Get current user's profile info for the notification
+              const { data: followerProfile } = await supabase
+                .from('profiles')
+                .select('username, avatar_url')
+                .eq('id', currentUserId)
+                .single();
+                
+              if (followerProfile) {
+                // Create notification using the create_notification function
+                try {
+                  const { data: notificationData, error: notificationError } = await supabase
+                    .rpc('create_notification', {
+                      p_recipient_id: userId,
+                      p_sender_id: currentUserId,
+                      p_type: 'follow',
+                      p_content: 'started following you',
+                      p_reference_id: null
+                    });
+                    
+                  if (notificationError) {
+                    console.error('Error creating follow notification:', notificationError.message, notificationError.details);
+                  } else {
+                    console.log('Follow notification created successfully');
+                  }
+                } catch (notifError) {
+                  console.error('Exception creating follow notification:', notifError);
+                }
+              }
+            }
+              
+            if (error) {
+              console.error('Error following user:', error);
+            } else {
+              setIsFollowing(true);
+              setFollowersCount(prev => prev + 1);
+            }
           }
         }
       } catch (error) {
         console.error('Error handling follow:', error);
       }
     };
+    
+    // Add function to check follow request status
+    const checkFollowRequestStatus = async () => {
+      try {
+        const { data: session } = await supabase.auth.getSession();
+        if (!session?.session?.user) return;
+        
+        const currentUserId = session.session.user.id;
+        
+        const { data, error } = await supabase
+          .from('follow_requests')
+          .select('status')
+          .eq('sender_id', currentUserId)
+          .eq('recipient_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+          
+        if (error) {
+          console.error('Error checking follow request status:', error);
+          return;
+        }
+        
+        if (data && data.length > 0) {
+          setFollowRequestStatus(data[0].status);
+        } else {
+          setFollowRequestStatus(null);
+        }
+      } catch (error) {
+        console.error('Error checking follow request status:', error);
+      }
+    };
+    
+    // Add effect to check follow request status and subscribe to changes
+    useEffect(() => {
+      checkFollowRequestStatus();
+      
+      // Set up subscription for follow requests
+      const followRequestsSubscription = supabase
+        .channel('follow_requests_changes')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'follow_requests', filter: `sender_id=eq.${userId} OR recipient_id=eq.${userId}` }, 
+          () => {
+            checkFollowRequestStatus();
+          })
+        .subscribe();
+        
+      return () => {
+        supabase.removeChannel(followRequestsSubscription);
+      };
+    }, [userId]);
   
     // Fix the handleMessage function to navigate to MessageScreen
     const handleMessage = () => {
@@ -364,6 +632,157 @@ const UserProfileScreen = () => {
       recipientAvatar: userProfile?.avatar_url
     });
     };
+
+  const handleFollowersPress = () => {
+    // Check if user can view followers list
+    if (hasPrivateAccount && !canViewPrivateContent) {
+      Alert.alert(
+        'Private Account',
+        'You need to follow this account to see their followers.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    navigation.navigate('FollowersList', { userId: userId });
+  };
+
+  const handleFollowingPress = () => {
+    // Check if user can view following list
+    if (hasPrivateAccount && !canViewPrivateContent) {
+      Alert.alert(
+        'Private Account',
+        'You need to follow this account to see who they follow.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    navigation.navigate('FollowingList', { userId: userId });
+  };
+  
+  const handlePostPress = (index) => {
+    console.log('Post pressed at index:', index);
+    navigation.navigate('PostViewer', {
+      posts: activeTab === 'Post' ? memoizedPosts : memoizedShorts,
+      initialIndex: index,
+    });
+  };
+
+  const renderGridItem = ({ item, index }) => {
+    if (item.type === 'text' || !item.media_url) {
+      return (
+        <TouchableOpacity 
+          style={[styles.gridItem, styles.textGridItem]} 
+          onPress={() => handlePostPress(index)}
+        >
+          <View style={styles.textPostContent}>
+            <Text style={styles.gridTextContent} numberOfLines={4}>
+              {item.caption || item.content}
+            </Text>
+            <View style={styles.gridItemFooter}>
+              <View style={styles.gridItemStats}>
+                <Ionicons name="heart" size={14} color="#ff00ff" />
+                <Text style={styles.gridItemStatsText}>{item.likes?.[0]?.count || 0}</Text>
+                <Ionicons name="chatbubble" size={14} color="#ff00ff" style={{ marginLeft: 8 }} />
+                <Text style={styles.gridItemStatsText}>{item.comments?.[0]?.count || 0}</Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    return (
+      <TouchableOpacity 
+        style={styles.gridItem} 
+        onPress={() => handlePostPress(index)}
+      >
+        {item.type === 'video' ? (
+          <View style={styles.gridVideoContainer}>
+            <Image
+              source={{ uri: item.media_url || 'https://via.placeholder.com/300' }}
+              style={styles.gridImage}
+              resizeMode="cover"
+            />
+            <View style={styles.videoIndicator}>
+              <Ionicons name="play-circle" size={24} color="#fff" />
+            </View>
+          </View>
+        ) : (
+          <Image
+            source={{ uri: item.media_url || 'https://via.placeholder.com/300' }}
+            style={styles.gridImage}
+            resizeMode="cover"
+          />
+        )}
+        <View style={styles.gridItemOverlay}>
+          <View style={styles.gridItemStats}>
+            <Ionicons name="heart" size={14} color="#fff" />
+            <Text style={styles.gridItemStatsText}>{item.likes?.[0]?.count || 0}</Text>
+            <Ionicons name="chatbubble" size={14} color="#fff" style={{ marginLeft: 8 }} />
+            <Text style={styles.gridItemStatsText}>{item.comments?.[0]?.count || 0}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+  
+  const renderContent = () => {
+    if (loadingContent) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#ff00ff" />
+        </View>
+      );
+    }
+
+    if (activeTab === 'Details') {
+      return (
+        <View style={styles.detailsSection}>
+          <View style={styles.detailItem}>
+            <Ionicons name="person-outline" size={24} color="#666" />
+            <View style={styles.detailContent}>
+              <Text style={styles.detailTitle}>About me</Text>
+              <Text style={styles.detailText}>
+                {userProfile?.bio || 'No bio added yet'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.detailItem}>
+            <Ionicons name="trophy-outline" size={24} color="#FFD700" />
+            <View style={styles.detailContent}>
+              <Text style={styles.detailTitle}>Member Rank</Text>
+              <Text style={styles.detailText}>
+                {userProfile?.rank 
+                  ? `Member #${userProfile.rank} on Flexx`
+                  : 'Rank not assigned yet'}
+              </Text>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    const data = activeTab === 'Post' ? memoizedPosts : memoizedShorts;
+    return data.length > 0 ? (
+      <FlatList
+        data={data}
+        renderItem={renderGridItem}
+        numColumns={3}
+        keyExtractor={item => item.id.toString()}
+        columnWrapperStyle={styles.gridRow}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.gridContainer}
+        scrollEnabled={true}
+      />
+    ) : (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>
+          {activeTab === 'Post' ? 'No posts yet' : 'No shorts yet'}
+        </Text>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -425,17 +844,28 @@ const UserProfileScreen = () => {
             {renderBio()}
             
             <View style={styles.buttonContainer}>
-              <TouchableOpacity 
-                style={[
-                  styles.followButton,
-                  isFollowing ? styles.followingButton : {}
-                ]}
-                onPress={handleFollow}
-              >
-                <Text style={styles.followButtonText}>
-                  {isFollowing ? 'FOLLOWING' : 'FOLLOW'}
-                </Text>
-              </TouchableOpacity>
+              {followRequestStatus === 'pending' ? (
+                <TouchableOpacity 
+                  style={[styles.followButton, styles.pendingButton]}
+                  disabled={true}
+                >
+                  <Text style={styles.followButtonText}>
+                    REQUEST SENT
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity 
+                  style={[
+                    styles.followButton,
+                    isFollowing ? styles.followingButton : {}
+                  ]}
+                  onPress={handleFollow}
+                >
+                  <Text style={styles.followButtonText}>
+                    {isFollowing ? 'FOLLOWING' : hasPrivateAccount ? 'REQUEST' : 'FOLLOW'}
+                  </Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity 
                 style={styles.messageButton}
                 onPress={handleMessage}
@@ -445,60 +875,75 @@ const UserProfileScreen = () => {
             </View>
   
             <View style={styles.statsContainer}>
-              <View style={styles.stat}>
-                <Text style={styles.statNumber}>100</Text>
-                <Text style={styles.statLabel}>Post</Text>
-              </View>
-              <View style={styles.stat}>
-                <Text style={styles.statNumber}>20</Text>
-                <Text style={styles.statLabel}>Shorts</Text>
-              </View>
-              <View style={styles.stat}>
-                <Text style={styles.statNumber}>{followersCount}</Text>
-                <Text style={styles.statLabel}>Followers</Text>
-              </View>
-              <View style={styles.stat}>
-                <Text style={styles.statNumber}>{followingCount}</Text>
-                <Text style={styles.statLabel}>Following</Text>
-              </View>
+            <View style={styles.stat}>
+              <Text style={styles.statNumber}>{canViewPrivateContent ? postsCount : hasPrivateAccount ? '•••' : postsCount}</Text>
+              <Text style={styles.statLabel}>Post</Text>
             </View>
+            <View style={styles.stat}>
+              <Text style={styles.statNumber}>{canViewPrivateContent ? shortsCount : hasPrivateAccount ? '•••' : shortsCount}</Text>
+              <Text style={styles.statLabel}>Shorts</Text>
+            </View>
+            <TouchableOpacity style={styles.stat} onPress={handleFollowersPress}>
+              <Text style={styles.statNumber}>{canViewPrivateContent ? followersCount : hasPrivateAccount ? '•••' : followersCount}</Text>
+              <Text style={styles.statLabel}>Followers</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.stat} onPress={handleFollowingPress}>
+              <Text style={styles.statNumber}>{canViewPrivateContent ? followingCount : hasPrivateAccount ? '•••' : followingCount}</Text>
+              <Text style={styles.statLabel}>Following</Text>
+            </TouchableOpacity>
+          </View>
           </View>
   
           <View style={styles.tabsContainer}>
-            <TouchableOpacity style={styles.tabButton}>
-              <Text style={styles.tabButtonText}>Post</Text>
+            <TouchableOpacity 
+              style={[styles.tabButton, activeTab === 'Post' && styles.activeTab]}
+              onPress={() => {
+                if (hasPrivateAccount && !canViewPrivateContent) {
+                  Alert.alert(
+                    'Private Account',
+                    'You need to follow this account to see their posts.',
+                    [{ text: 'OK' }]
+                  );
+                  return;
+                }
+                setActiveTab('Post');
+              }}
+            >
+              <Text style={[styles.tabButtonText, activeTab === 'Post' && styles.activeTabText]}>Post</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.tabButton}>
-              <Text style={styles.tabButtonText}>Shorts</Text>
+            <TouchableOpacity 
+              style={[styles.tabButton, activeTab === 'Short' && styles.activeTab]}
+              onPress={() => {
+                if (hasPrivateAccount && !canViewPrivateContent) {
+                  Alert.alert(
+                    'Private Account',
+                    'You need to follow this account to see their shorts.',
+                    [{ text: 'OK' }]
+                  );
+                  return;
+                }
+                setActiveTab('Short');
+              }}
+            >
+              <Text style={[styles.tabButtonText, activeTab === 'Short' && styles.activeTabText]}>Shorts</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.tabButton, styles.activeTab]}>
-              <Text style={[styles.tabButtonText, styles.activeTabText]}>Details</Text>
+            <TouchableOpacity 
+              style={[styles.tabButton, activeTab === 'Details' && styles.activeTab]}
+              onPress={() => setActiveTab('Details')}
+            >
+              <Text style={[styles.tabButtonText, activeTab === 'Details' && styles.activeTabText]}>Details</Text>
             </TouchableOpacity>
           </View>
-  
-          <View style={styles.detailsSection}>
-            <View style={styles.detailItem}>
-              <Ionicons name="person-outline" size={24} color="#666" />
-              <View style={styles.detailContent}>
-                <Text style={styles.detailTitle}>About me</Text>
-                <Text style={styles.detailText}>
-                  {userProfile?.bio || 'No bio added yet'}
-                </Text>
-              </View>
+          
+          {hasPrivateAccount && !canViewPrivateContent && (
+            <View style={styles.privateAccountMessage}>
+              <Ionicons name="lock-closed" size={40} color="#ff00ff" />
+              <Text style={styles.privateAccountTitle}>This Account is Private</Text>
+              <Text style={styles.privateAccountText}>Follow this account to see their posts and shorts.</Text>
             </View>
-  
-            <View style={styles.detailItem}>
-              <Ionicons name="trophy-outline" size={24} color="#FFD700" />
-              <View style={styles.detailContent}>
-                <Text style={styles.detailTitle}>Member Rank</Text>
-                <Text style={styles.detailText}>
-                  {userProfile?.rank 
-                    ? `Member #${userProfile.rank} on Flexx`
-                    : 'Rank not assigned yet'}
-                </Text>
-              </View>
-            </View>
-          </View>
+          )}
+          
+          {(!hasPrivateAccount || canViewPrivateContent) && renderContent()}
         </ScrollView>
       ) : (
         <View style={[styles.container, styles.centered]}>
@@ -558,6 +1003,121 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
     marginLeft: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    minHeight: 200,
+  },
+  emptyText: {
+    color: '#666',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  gridContainer: {
+    padding: 4,
+    paddingBottom: 20,
+  },
+  gridRow: {
+    justifyContent: 'flex-start',
+    padding: 2,
+  },
+  gridItem: {
+    flex: 1,
+    margin: 2,
+    aspectRatio: 1,
+    maxWidth: '33.33%',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  gridImage: {
+    width: '100%',
+    height: '100%',
+  },
+  gridVideoContainer: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoIndicator: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -12 }, { translateY: -12 }],
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 12,
+    padding: 4,
+    zIndex: 2,
+  },
+  gridItemOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 4,
+  },
+  gridItemStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  gridItemStatsText: {
+    color: '#fff',
+    fontSize: 12,
+    marginLeft: 4,
+  },
+  textGridItem: {
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  textPostContent: {
+    flex: 1,
+    padding: 8,
+    justifyContent: 'space-between',
+  },
+  gridTextContent: {
+    color: '#fff',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  gridItemFooter: {
+    marginTop: 'auto',
+  },
+  privateAccountMessage: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+    marginHorizontal: 20,
+    marginVertical: 20,
+    backgroundColor: '#111',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+  privateAccountTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 15,
+    marginBottom: 8,
+  },
+  privateAccountText: {
+    color: '#999',
+    fontSize: 14,
+    textAlign: 'center',
   },
   profileSection: {
     alignItems: 'center',
@@ -644,6 +1204,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ff00ff',
   },
+  pendingButton: {
+    backgroundColor: '#888',
+    borderWidth: 1,
+    borderColor: '#666',
+  },
   followButtonText: {
     color: 'white',
     fontWeight: '600',
@@ -699,10 +1264,10 @@ const styles = StyleSheet.create({
   },
   activeTab: {
     borderBottomWidth: 2,
-    borderBottomColor: '#faf7f8',
+    borderBottomColor: '#ff00ff',
   },
   activeTabText: {
-    color: '#1DA1F2',
+    color: '#ff00ff',
   },
   detailsSection: {
     padding: 20,

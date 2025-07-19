@@ -64,6 +64,24 @@ const MessageScreen = () => {
     setupConversation();
   }, [recipientId]);
 
+  // Add navigation focus effect to mark messages as read when screen comes into focus
+  useEffect(() => {
+    if (conversationId && userId) {
+      console.log('Setting up focus listener for conversation:', conversationId);
+      
+      const unsubscribe = navigation.addListener('focus', () => {
+        console.log('MessageScreen focused, marking messages as read');
+        // Mark messages as read when the screen comes into focus
+        markMessagesAsRead(userId, conversationId);
+      });
+      
+      // Also mark messages as read when the component mounts
+      markMessagesAsRead(userId, conversationId);
+      
+      return unsubscribe;
+    }
+  }, [navigation, conversationId, userId]);
+
   // Set up real-time subscription for new messages
   useEffect(() => {
     if (!conversationId) return;
@@ -85,6 +103,44 @@ const MessageScreen = () => {
     };
   }, [conversationId, userId]);
 
+  // Mark messages as read when user opens the conversation
+  const markMessagesAsRead = async (currentUserId, convId) => {
+    try {
+      console.log('Marking messages as read for user:', currentUserId, 'in conversation:', convId);
+      
+      // Update all unread messages where the current user is the receiver
+      const { data, error } = await supabase
+        .from('messages')
+        .update({ read: true })
+        .eq('conversation_id', convId)
+        .eq('receiver_id', currentUserId)
+        .eq('read', false)
+        .select();
+        
+      if (error) {
+        console.error('Error marking messages as read:', error);
+      } else {
+        console.log('Messages marked as read:', data?.length || 0, 'messages updated');
+        
+        // If messages were updated, refresh the local state to reflect read status
+        if (data && data.length > 0) {
+          setMessages(prevMessages => 
+            prevMessages.map(msg => {
+              // Find if this message was just marked as read
+              const updatedMsg = data.find(m => m.id === msg.id);
+              if (updatedMsg) {
+                return { ...msg, read: true };
+              }
+              return msg;
+            })
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error marking messages as read:', error);
+    }
+  };
+  
   // Handle real-time updates
   const handleRealTimeUpdate = (payload) => {
     if (payload.eventType === 'INSERT') {
@@ -96,8 +152,14 @@ const MessageScreen = () => {
         text: newMessage.content,
         sender: newMessage.sender_id === userId ? 'me' : 'them',
         timestamp: new Date(newMessage.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-        sender_id: newMessage.sender_id
+        sender_id: newMessage.sender_id,
+        read: newMessage.read || false
       };
+      
+      // If the message is received by the current user, mark it as read
+      if (newMessage.receiver_id === userId && !newMessage.read) {
+        markMessagesAsRead(userId, conversationId);
+      }
       
       // Check if this message already exists in our state (to avoid duplicates)
       setMessages(prevMessages => {
@@ -108,6 +170,19 @@ const MessageScreen = () => {
         }
         return [...prevMessages, formattedMessage];
       });
+    } else if (payload.eventType === 'UPDATE') {
+      // Update message in UI (for read receipts)
+      const updatedMessage = payload.new;
+      
+      setMessages(prevMessages => 
+        prevMessages.map(msg => 
+          msg.id === updatedMessage.id ? 
+          {
+            ...msg,
+            read: updatedMessage.read
+          } : msg
+        )
+      );
     } else if (payload.eventType === 'DELETE') {
       // Remove deleted message from UI
       setMessages(prevMessages => 
@@ -162,13 +237,17 @@ const MessageScreen = () => {
           text: msg.content,
           sender: msg.sender_id === currentUserId ? 'me' : 'them',
           timestamp: new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-          sender_id: msg.sender_id
+          sender_id: msg.sender_id,
+          read: msg.read || false
         }));
         
         setMessages(formattedMessages);
         
         // Save to AsyncStorage as backup
         await AsyncStorage.setItem(`conversation_${convId}`, JSON.stringify(formattedMessages));
+        
+        // Mark all messages as read where the current user is the receiver
+        await markMessagesAsRead(currentUserId, convId);
       }
     } catch (error) {
       console.error('Error loading messages:', error);
@@ -288,18 +367,31 @@ const MessageScreen = () => {
         item.sender === 'me' ? styles.myMessage : styles.theirMessage
       ]}>
         <Text style={styles.messageText}>{item.text}</Text>
-        <Text style={styles.timestamp}>{item.timestamp}</Text>
+        <View style={styles.messageFooter}>
+          <Text style={styles.timestamp}>{item.timestamp}</Text>
+          {item.sender === 'me' && (
+            <View style={styles.readStatus}>
+              <Ionicons 
+                name={item.read ? "checkmark-done" : "checkmark"} 
+                size={14} 
+                color={item.read ? "#34aadc" : "rgba(255, 255, 255, 0.5)"} 
+              />
+            </View>
+          )}
+        </View>
       </View>
     </TouchableOpacity>
   );
 
   // Get a display name from the UUID if no name is provided
   const getDisplayName = () => {
-    if (recipientName && recipientName !== "User" && !recipientName.includes("-")) {
+    // We're now prioritizing username in MessagesScreen.js
+    // so we should just display the passed recipientName
+    if (recipientName && recipientName !== "User") {
       return recipientName;
     }
     
-    // If it's a UUID, just return "Chat"
+    // If no valid name, just return "Chat"
     return "Chat";
   };
 
@@ -327,6 +419,15 @@ const MessageScreen = () => {
               style={styles.avatar} 
             />
             <Text style={styles.headerTitle}>{getDisplayName()}</Text>
+          </View>
+          
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.headerButton}>
+              <Ionicons name="call-outline" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerButton}>
+              <Ionicons name="videocam-outline" size={22} color="#fff" />
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -361,29 +462,29 @@ const MessageScreen = () => {
         {/* Input Area */}
         <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <View style={styles.inputWrapper}>
+            <TouchableOpacity style={styles.mediaButton}>
+              <Ionicons name="camera-outline" size={24} color="#ff00ff" />
+            </TouchableOpacity>
             <TextInput
               style={styles.input}
               value={inputText}
               onChangeText={setInputText}
               placeholder="Type a message..."
-              placeholderTextColor="#666"
+              placeholderTextColor="#8e8e8e"
               multiline
             />
-            
-            <TouchableOpacity 
-              onPress={sendMessage} 
-              style={[
-                styles.sendButton,
-                !inputText.trim() ? styles.sendButtonDisabled : styles.sendButtonActive
-              ]}
-              disabled={!inputText.trim()}
-            >
-              <Ionicons 
-                name="send" 
-                size={24} 
-                color={inputText.trim() ? "#fff" : "#666"} 
-              />
-            </TouchableOpacity>
+            {!inputText.trim() ? (
+              <TouchableOpacity style={styles.mediaButton}>
+                <Ionicons name="mic-outline" size={24} color="#8e8e8e" />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity 
+                style={[styles.sendButton, styles.sendButtonActive]}
+                onPress={sendMessage}
+              >
+                <Ionicons name="send" size={18} color="white" />
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>
@@ -399,19 +500,13 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    backgroundColor: '#222',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#222',
   },
   backButton: {
-    padding: 8,
+    padding: 5,
   },
   profileInfo: {
     flexDirection: 'row',
@@ -420,18 +515,25 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     marginRight: 10,
-    borderWidth: 2,
-    borderColor: '#ff00ff',
-    backgroundColor: '#333',
+    borderWidth: 0.5,
+    borderColor: '#333',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
-    color: 'white',
+    color: '#fff',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerButton: {
+    padding: 8,
+    marginLeft: 8,
   },
   messageList: {
     flex: 1,
@@ -444,8 +546,8 @@ const styles = StyleSheet.create({
   messageBubble: {
     padding: 12,
     borderRadius: 20,
-    marginVertical: 5,
-    maxWidth: '80%',
+    maxWidth: '70%',
+    marginVertical: 4,
     elevation: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -453,9 +555,9 @@ const styles = StyleSheet.create({
     shadowRadius: 1,
   },
   myMessage: {
-    backgroundColor: '#333',
+    backgroundColor: '#0066ff',
     alignSelf: 'flex-end',
-    borderTopRightRadius: 4,
+    borderBottomRightRadius: 4,
   },
   theirMessage: {
     backgroundColor: '#ff00ff',
@@ -464,27 +566,35 @@ const styles = StyleSheet.create({
   },
   messageText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 15,
+  },
+  messageFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: 4,
   },
   timestamp: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 12,
-    alignSelf: 'flex-end',
-    marginTop: 4,
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 11,
+    marginRight: 4,
+  },
+  readStatus: {
+    marginLeft: 2,
   },
   inputContainer: {
     paddingHorizontal: 10,
     paddingVertical: 12,
-    backgroundColor: '#222',
-    borderTopWidth: 1,
-    borderTopColor: '#333',
+    backgroundColor: '#000',
+    borderTopWidth: 0.5,
+    borderTopColor: '#222',
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#333',
+    backgroundColor: '#262626',
     borderRadius: 24,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
   },
   input: {
     flex: 1,
@@ -492,20 +602,29 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 5,
     maxHeight: 100,
+    fontSize: 15,
   },
   sendButton: {
     padding: 8,
     borderRadius: 20,
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendButtonActive: {
-    backgroundColor: '#ff00ff',
+    backgroundColor: '#0095f6',
   },
   sendButtonDisabled: {
     backgroundColor: 'rgba(51, 51, 51, 0.5)',
+  },
+  mediaButton: {
+    padding: 8,
+    borderRadius: 20,
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyContainer: {
     flex: 1,

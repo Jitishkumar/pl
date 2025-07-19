@@ -134,6 +134,33 @@ export class PostsService {
   // Get posts for a specific user
   static async getUserPosts(userId) {
     try {
+      // Get current user
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      
+      // Check if the profile has a private account
+      const { data: settingsData } = await supabase
+        .from('user_settings')
+        .select('private_account')
+        .eq('user_id', userId)
+        .single();
+      
+      // If the account is private and the current user is not the profile owner
+      if (settingsData?.private_account && currentUser?.id !== userId) {
+        // Check if current user follows this profile
+        const { data: followData } = await supabase
+          .from('follows')
+          .select('*')
+          .eq('follower_id', currentUser?.id)
+          .eq('following_id', userId)
+          .single();
+          
+        // If not following, return empty array
+        if (!followData) {
+          return [];
+        }
+      }
+      
+      // Fetch posts if allowed
       const { data, error } = await supabase
         .from('posts')
         .select(`
