@@ -644,7 +644,7 @@ const ConfessionScreen = () => {
             <TouchableOpacity 
               onPress={() => {
                 if (!item.is_anonymous && item.user_id) {
-                  navigation.navigate('UserProfile', { userId: item.user_id });
+                  navigation.navigate('UserProfileScreen', { userId: item.user_id });
                 }
               }}
             >

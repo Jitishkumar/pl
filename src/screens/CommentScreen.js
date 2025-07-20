@@ -271,7 +271,7 @@ const CommentScreen = ({ visible, onClose, postId }) => {
   
   // Navigate to user profile
   const navigateToUserProfile = (userId) => {
-    navigation.navigate('UserProfile', { userId });
+    navigation.navigate('UserProfileScreen', { userId });
   };
 
   const renderComment = ({ item }) => {

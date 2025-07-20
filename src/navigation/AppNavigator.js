@@ -105,8 +105,8 @@ export const AppNavigator = () => {
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       <Stack.Screen name="Search" component={SearchScreen} />
       <Stack.Screen name="Confession" component={ConfessionScreen} />
-      <Stack.Screen name="UserProfile" component={UserProfileScreen} />
-      <Stack.Screen name="PrivateProfile" component={PrivateProfileScreen} />
+      <Stack.Screen name="UserProfileScreen" component={UserProfileScreen} />
+      <Stack.Screen name="PrivateProfileScreen" component={PrivateProfileScreen} />
       <Stack.Screen name="MessageScreen" component={MessageScreen} />
       <Stack.Screen name="Stories" component={StoriesScreen} options={{ headerShown: false }} />
       <Stack.Screen name="AddAccount" component={AddAccountScreen} options={{ headerShown: false }} />

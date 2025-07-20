@@ -3,7 +3,7 @@ create table notifications (
   id uuid default uuid_generate_v4() primary key,
   recipient_id uuid references auth.users(id) on delete cascade,
   sender_id uuid references auth.users(id) on delete cascade,
-  type varchar not null check (type in ('like', 'comment', 'follow', 'mention')),
+  type varchar not null check (type in ('like', 'comment', 'follow', 'mention', 'follow_request', 'follow_accepted')),
   content text not null,
   reference_id uuid, -- ID of the referenced content (post, comment, etc.)
   is_read boolean default false,

@@ -851,7 +851,7 @@ const ProfileScreen = () => {
                     style={styles.connectionItem}
                     onPress={() => {
                       onClose();
-                      navigation.navigate('UserProfile', { userId: item.id });
+                      navigation.navigate('UserProfileScreen', { userId: item.id });
                     }}
                   >
                     <Image 

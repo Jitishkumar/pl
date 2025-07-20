@@ -35,6 +35,14 @@ const PrivateProfileScreen = () => {
       supabase.removeChannel(followRequestsSubscription);
     };
   }, [userId]);
+  
+  // Effect to navigate to UserProfile when follow request is accepted
+  useEffect(() => {
+    if (followRequestStatus === 'accepted') {
+      // Navigate to UserProfileScreen since the request has been accepted
+      navigation.replace('UserProfileScreen', { userId });
+    }
+  }, [followRequestStatus, userId, navigation]);
 
   const loadUserProfile = async () => {
     try {
@@ -63,12 +71,18 @@ const PrivateProfileScreen = () => {
         .eq('id', userId)
         .single();
         
-      // Check if user has private account
+      // Check if user has private account using the RLS-bypassing function
       const { data: settingsData, error: settingsError } = await supabase
-        .from('user_settings')
-        .select('private_account')
-        .eq('user_id', userId)
-        .single();
+        .rpc('get_user_privacy', { target_user_id: userId })
+        .maybeSingle();
+      
+      // If no settings data found or account is not private, redirect to UserProfileScreen
+      if (!settingsData || settingsData.private_account !== true) {
+        console.log('Privacy check: Account is not private or no settings found, redirecting to UserProfileScreen');
+        // We can't create settings for other users due to RLS policies
+        navigation.replace('UserProfileScreen', { userId });
+        return;
+      }
   
       if (error) {
         console.error('Error loading user profile:', error);
@@ -138,6 +152,26 @@ const PrivateProfileScreen = () => {
       // Don't check follow request status if viewing own profile
       if (user.id === userId) return;
       
+      // First check if the user is already following this account
+      const { data: followData, error: followError } = await supabase
+        .from('follows')
+        .select('*')
+        .eq('follower_id', user.id)
+        .eq('following_id', userId)
+        .maybeSingle();
+        
+      if (followError) {
+        console.error('Error checking follow status:', followError);
+      }
+      
+      // If already following, navigate to UserProfileScreen
+      if (followData) {
+        // Navigate to UserProfileScreen since the user is already following
+        navigation.replace('UserProfileScreen', { userId });
+        return;
+      }
+      
+      // Check for follow requests
       const { data, error } = await supabase
         .from('follow_requests')
         .select('*')
@@ -152,6 +186,11 @@ const PrivateProfileScreen = () => {
       if (data) {
         setFollowRequestSent(true);
         setFollowRequestStatus(data.status);
+        
+        // If request is accepted, navigate to UserProfileScreen
+        if (data.status === 'accepted') {
+          navigation.replace('UserProfileScreen', { userId });
+        }
       } else {
         setFollowRequestSent(false);
         setFollowRequestStatus(null);

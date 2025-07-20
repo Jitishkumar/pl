@@ -329,11 +329,29 @@ const NotificationsScreen = () => {
           [
             { 
               text: 'View Profile', 
-              onPress: () => navigation.navigate('UserProfile', { userId: senderId })
+              onPress: async () => {
+                try {
+                  // Get the current user's ID
+                  const { data: { user } } = await supabase.auth.getUser();
+                  if (!user) {
+                    navigation.navigate('Login');
+                    return;
+                  }
+
+                  // Since the follow request was just accepted, we can navigate directly to UserProfile
+                  navigation.navigate('UserProfileScreen', { userId: item.sender_id });
+                } catch (error) {
+                  console.error('Error navigating to profile:', error);
+                  navigation.navigate('UserProfileScreen', { userId: item.sender_id });
+                }
+              }
             },
             { text: 'OK' }
           ]
         );
+        
+        // Automatically navigate to UserProfile after accepting
+      // Don't automatically navigate - let the user decide via the alert options
       }
     } catch (error) {
       console.error('Error accepting follow request:', error);
@@ -349,11 +367,11 @@ const NotificationsScreen = () => {
         // Extract the request ID from the notification ID (remove 'fr_' prefix)
         requestId = notificationId.substring(3);
         
-        // Update the specific follow request
-        const { error } = await supabase
-          .from('follow_requests')
-          .update({ status: 'declined' })
-          .eq('id', requestId);
+        // Call the decline_follow_request function
+        const { data, error } = await supabase
+          .rpc('decline_follow_request', {
+            request_id: requestId
+          });
           
         if (error) {
           console.error('Error declining follow request:', error);
@@ -362,12 +380,26 @@ const NotificationsScreen = () => {
         }
       } else {
         // Fallback: update based on sender and recipient IDs
-        const { error } = await supabase
+        const { data: requestData, error: requestError } = await supabase
           .from('follow_requests')
-          .update({ status: 'declined' })
+          .select('id')
           .eq('sender_id', senderId)
           .eq('recipient_id', (await supabase.auth.getUser()).data.user.id)
-          .eq('status', 'pending');
+          .eq('status', 'pending')
+          .single();
+          
+        if (requestError) {
+          console.error('Error finding follow request:', requestError);
+          return;
+        }
+        
+        requestId = requestData.id;
+        
+        // Call the decline_follow_request function
+        const { data, error } = await supabase
+          .rpc('decline_follow_request', {
+            request_id: requestId
+          });
           
         if (error) {
           console.error('Error declining follow request:', error);
@@ -396,9 +428,59 @@ const NotificationsScreen = () => {
       <View style={[styles.notificationItem, !item.is_read && styles.unreadItem]}>
         <TouchableOpacity 
           style={styles.avatarContainer}
-          onPress={() => {
+          onPress={async () => {
             markAsRead(item.id);
-            navigation.navigate('UserProfile', { userId: item.sender_id });
+            
+            try {
+                  // Get the current user's ID
+                  const { data: { user } } = await supabase.auth.getUser();
+                  if (!user) {
+                    navigation.navigate('Login');
+                    return;
+                  }
+
+                  // Don't check privacy for own profile
+                  if (user.id === item.sender_id) {
+                    navigation.navigate('Profile');
+                    return;
+                  }
+
+                  // Check if the profile is private and if the current user is following them
+                  const { data: settingsData, error: settingsError } = await supabase
+                    .from('user_settings')
+                    .select('private_account')
+                    .eq('user_id', item.sender_id)
+                    .maybeSingle();
+
+                  if (settingsError) throw settingsError;
+
+                  const isPrivate = settingsData?.private_account ?? false;
+
+                  // If account is private, check if the current user is an approved follower
+                  if (isPrivate) {
+                    const { data: followData, error: followError } = await supabase
+                      .from('follows')
+                      .select('*')
+                      .eq('follower_id', user.id)
+                      .eq('following_id', item.sender_id)
+                      .maybeSingle();
+
+                    if (followError) throw followError;
+
+                    // If the user is not an approved follower, navigate to PrivateProfile
+                    if (!followData) {
+                      navigation.navigate('PrivateProfileScreen', { userId: item.sender_id });
+                      return;
+                    }
+                  }
+
+                  // If account is not private or user is an approved follower, navigate to UserProfile
+                  navigation.navigate('UserProfileScreen', { userId: item.sender_id });
+            } catch (error) {
+              console.error('Error checking profile privacy:', error);
+              // Default to UserProfileScreen in case of error
+              navigation.navigate('UserProfileScreen', { userId: item.sender_id });
+            }
           }}
         >
           <Image 
@@ -412,9 +494,54 @@ const NotificationsScreen = () => {
         
         <View style={styles.contentContainer}>
           <TouchableOpacity 
-            onPress={() => {
+            onPress={async () => {
               markAsRead(item.id);
-              navigation.navigate('UserProfile', { userId: item.sender_id });
+              
+              try {
+                // Get the current user's ID
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!user) {
+                  navigation.navigate('Login');
+                  return;
+                }
+
+                // Check if the profile is private and if the current user is following them
+                const { data: settingsData, error: settingsError } = await supabase
+                  .from('user_settings')
+                  .select('private_account')
+                  .eq('user_id', item.sender_id)
+                  .maybeSingle();
+
+                if (settingsError) throw settingsError;
+
+                const isPrivate = settingsData?.private_account ?? false;
+
+                // If account is private, check if the current user is an approved follower
+                if (isPrivate) {
+                  const { data: followData, error: followError } = await supabase
+                    .from('follows')
+                    .select('*')
+                    .eq('follower_id', user.id)
+                    .eq('following_id', item.sender_id)
+                    .eq('status', 'accepted')
+                    .maybeSingle();
+
+                  if (followError) throw followError;
+
+                  // If the user is not an approved follower, navigate to PrivateProfile
+                  if (!followData) {
+                    navigation.navigate('PrivateProfileScreen', { userId: item.sender_id });
+                    return;
+                  }
+                }
+
+                // If account is not private or user is an approved follower, navigate to UserProfile
+                navigation.navigate('UserProfileScreen', { userId: item.sender_id });
+              } catch (error) {
+                console.error('Error checking profile privacy:', error);
+                // Default to UserProfileScreen in case of error
+                navigation.navigate('UserProfileScreen', { userId: item.sender_id });
+              }
             }}
           >
             <Text style={styles.username}>@{item.sender.username}</Text>

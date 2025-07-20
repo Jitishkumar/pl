@@ -68,7 +68,7 @@ const PostItem = ({ post, onOptionsPress }) => {
   const { activeVideoId, setActiveVideo, clearActiveVideo, isFullscreenMode, setFullscreen: setContextFullscreen } = useVideo();
 
   const handleProfilePress = () => {
-    navigation.navigate('UserProfile', { userId: post?.user_id || post?.user?.id });
+    navigation.navigate('UserProfileScreen', { userId: post?.user_id || post?.user?.id });
   };
 
   const handleVideoPress = () => {
@@ -625,7 +625,7 @@ const PostItem = ({ post, onOptionsPress }) => {
                       style={styles.likeItem}
                       onPress={() => {
                         setShowLikesModal(false);
-                        navigation.navigate('UserProfile', { userId: like.user_id });
+                        navigation.navigate('UserProfileScreen', { userId: like.user_id });
                       }}
                     >
                       <Image 

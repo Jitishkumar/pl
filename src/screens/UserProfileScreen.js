@@ -5,6 +5,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { supabase } from '../config/supabase';
 import ProfileViewBlinker from '../components/ProfileViewBlinker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useVideo } from '../context/VideoContext';
 import { Video } from 'expo-av';
 
 const UserProfileScreen = () => {
@@ -20,6 +21,7 @@ const UserProfileScreen = () => {
   const [loadingContent, setLoadingContent] = useState(false);
   const blinkAnimation = useRef(new Animated.Value(0)).current;
   const insets = useSafeAreaInsets();
+  const { activeVideoId, setActiveVideo, clearActiveVideo } = useVideo();
   
   const memoizedPosts = useMemo(() => posts, [posts]);
   const memoizedShorts = useMemo(() => shorts, [shorts]);
@@ -95,6 +97,7 @@ const UserProfileScreen = () => {
     // Clean up subscription when component unmounts
     return () => {
       supabase.removeChannel(followsSubscription);
+      clearActiveVideo(); // Clear any active video when unmounting
     };
   }, [userId]);
   
@@ -158,29 +161,28 @@ const UserProfileScreen = () => {
         .from('user_settings')
         .select('private_account')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
         
-      if (settingsData) {
-        setHasPrivateAccount(settingsData.private_account);
-        
-        // User can view private content if they are the profile owner or if they follow the user
-        if (currentUser) {
-          if (currentUser.id === userId) {
-            setCanViewPrivateContent(true);
-          } else if (settingsData.private_account) {
-            // Check if current user follows this profile
-            const { data: followData } = await supabase
-              .from('follows')
-              .select('*')
-              .eq('follower_id', currentUser.id)
-              .eq('following_id', userId)
-              .single();
-              
-            setCanViewPrivateContent(!!followData);
-          } else {
-            // If account is not private, anyone can view content
-            setCanViewPrivateContent(true);
-          }
+      const isPrivate = settingsData?.private_account ?? false;
+      setHasPrivateAccount(isPrivate);
+      
+      // User can view private content if they are the profile owner or if they follow the user
+      if (currentUser) {
+        if (currentUser.id === userId) {
+          setCanViewPrivateContent(true);
+        } else if (isPrivate) {
+          // Check if current user follows this profile
+          const { data: followData } = await supabase
+            .from('follows')
+            .select('*')
+            .eq('follower_id', currentUser.id)
+            .eq('following_id', userId)
+            .single();
+            
+          setCanViewPrivateContent(!!followData);
+        } else {
+          // If account is not private, anyone can view content
+          setCanViewPrivateContent(true);
         }
       }
   
@@ -481,44 +483,17 @@ const UserProfileScreen = () => {
           } else {
             setIsFollowing(false);
             setFollowersCount(prev => Math.max(0, prev - 1));
+            // Update canViewPrivateContent when unfollowing a private account
+            if (hasPrivateAccount) {
+              setCanViewPrivateContent(false);
+            }
           }
         } else {
           // Check if the user has a private account
           if (hasPrivateAccount) {
-            // Send a follow request instead of directly following
-            const { error } = await supabase
-              .from('follow_requests')
-              .insert({
-                sender_id: currentUserId,
-                recipient_id: userId,
-                status: 'pending'
-              });
-              
-            if (error) {
-              console.error('Error sending follow request:', error);
-            } else {
-              setFollowRequestStatus('pending');
-              
-              // Create a notification for the follow request
-              try {
-                const { data: notificationData, error: notificationError } = await supabase
-                  .rpc('create_notification', {
-                    p_recipient_id: userId,
-                    p_sender_id: currentUserId,
-                    p_type: 'follow_request',
-                    p_content: 'wants to follow you',
-                    p_reference_id: null
-                  });
-                  
-                if (notificationError) {
-                  console.error('Error creating follow request notification:', notificationError.message, notificationError.details);
-                } else {
-                  console.log('Follow request notification created successfully');
-                }
-              } catch (notifError) {
-                console.error('Exception creating follow request notification:', notifError);
-              }
-            }
+            // For private accounts, navigate to PrivateProfileScreen to send follow request
+            navigation.replace('PrivateProfileScreen', { userId });
+            return;
           } else {
             // Follow - for public accounts
             const { error } = await supabase
@@ -661,8 +636,16 @@ const UserProfileScreen = () => {
   
   const handlePostPress = (index) => {
     console.log('Post pressed at index:', index);
+    const currentPosts = activeTab === 'Post' ? memoizedPosts : memoizedShorts;
+    const post = currentPosts[index];
+    
+    // If it's a video post, set the active video ID before navigating
+    if (post && post.type === 'video') {
+      setActiveVideo(post.id);
+    }
+    
     navigation.navigate('PostViewer', {
-      posts: activeTab === 'Post' ? memoizedPosts : memoizedShorts,
+      posts: currentPosts,
       initialIndex: index,
     });
   };
@@ -703,9 +686,15 @@ const UserProfileScreen = () => {
               style={styles.gridImage}
               resizeMode="cover"
             />
-            <View style={styles.videoIndicator}>
+            <TouchableOpacity 
+              style={styles.videoIndicator}
+              onPress={() => {
+                setActiveVideo(item.id);
+                handlePostPress(index);
+              }}
+            >
               <Ionicons name="play-circle" size={24} color="#fff" />
-            </View>
+            </TouchableOpacity>
           </View>
         ) : (
           <Image
@@ -844,6 +833,7 @@ const UserProfileScreen = () => {
             {renderBio()}
             
             <View style={styles.buttonContainer}>
+              {/* Show follow button for all accounts, but handle private accounts differently */}
               {followRequestStatus === 'pending' ? (
                 <TouchableOpacity 
                   style={[styles.followButton, styles.pendingButton]}
@@ -862,7 +852,7 @@ const UserProfileScreen = () => {
                   onPress={handleFollow}
                 >
                   <Text style={styles.followButtonText}>
-                    {isFollowing ? 'FOLLOWING' : hasPrivateAccount ? 'REQUEST' : 'FOLLOW'}
+                    {isFollowing ? 'FOLLOWING' : 'FOLLOW'}
                   </Text>
                 </TouchableOpacity>
               )}

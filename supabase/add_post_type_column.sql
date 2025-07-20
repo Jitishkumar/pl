@@ -1,6 +1,14 @@
 -- Add type column to posts table
-alter table public.posts
-  add column type text not null default 'text';
+DO $$ 
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                 WHERE table_schema = 'public' 
+                 AND table_name = 'posts' 
+                 AND column_name = 'type') THEN
+    ALTER TABLE public.posts
+      ADD COLUMN type text NOT NULL DEFAULT 'text';
+  END IF;
+END $$;
 
 -- Add comment to describe the column
 comment on column public.posts.type is 'Type of post content (text, image, video)';
